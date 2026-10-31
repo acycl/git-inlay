@@ -1,0 +1,240 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/acycl/git-inlay/internal/gitx"
+	"github.com/acycl/git-inlay/internal/guard"
+	"github.com/acycl/git-inlay/internal/hooks"
+	"github.com/acycl/git-inlay/internal/host"
+	"github.com/acycl/git-inlay/internal/inlay"
+	"github.com/acycl/git-inlay/internal/remote"
+)
+
+// hooks manages the host's hook shims.
+func (c *cli) hooks(args []string) error {
+	if len(args) != 1 {
+		return usagef("usage: git inlay hooks install|uninstall|status")
+	}
+	s, err := c.open()
+	if err != nil {
+		return err
+	}
+	var statuses []hooks.Status
+	var hooksPath string
+	switch args[0] {
+	case "install":
+		statuses, hooksPath, err = hooks.Install(s.host)
+		for _, e := range s.mine() {
+			if err == nil {
+				err = e.Inlay.InstallGuard()
+			}
+		}
+	case "uninstall":
+		statuses, err = hooks.Uninstall(s.host)
+	case "status":
+		statuses, hooksPath, err = hooks.Statuses(s.host)
+	default:
+		return usagef("usage: git inlay hooks install|uninstall|status")
+	}
+	if err != nil {
+		return err
+	}
+	for _, st := range statuses {
+		c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
+	}
+	for _, e := range s.mine() {
+		ok, err := e.Inlay.GuardInstalled()
+		if err != nil {
+			return err
+		}
+		state := "missing"
+		if ok {
+			state = "installed"
+		}
+		c.printf("%-11s %-10s %s\n", "inlay:"+e.Name, state, filepath.Join(e.Inlay.GitDir, "hooks", "pre-push"))
+	}
+	if hooksPath != "" {
+		c.printf("\ncore.hooksPath is %s, so %s", hooksPath, hooks.Snippet(hooks.Manager(s.host.Root)))
+	}
+	for _, st := range statuses {
+		if st.State == hooks.Foreign {
+			c.printf("\n%s exists and is not managed by git-inlay; add to it:\n  git-inlay hook %s \"$@\"\n", st.Path, st.Hook)
+		}
+	}
+	return nil
+}
+
+// hook runs one of the guards on behalf of a hook shim.
+func (c *cli) hook(args []string) error {
+	if len(args) == 0 {
+		return usagef("usage: git inlay hook pre-commit|pre-push|inlay-pre-push [args]")
+	}
+	switch args[0] {
+	case "pre-commit":
+		return c.hookPreCommit()
+	case "pre-push":
+		return c.hookPrePush(args[1:])
+	case "inlay-pre-push":
+		return c.hookInlayPrePush(args[1:])
+	}
+	return usagef("unknown hook %q", args[0])
+}
+
+// hookPreCommit refuses a host commit that stages a claimed path.
+func (c *cli) hookPreCommit() error {
+	s, err := c.load()
+	if err != nil {
+		return err
+	}
+	// Git may be committing from a temporary index (commit -a, commit <path>);
+	// inspect that one rather than .git/index.
+	s.host.IndexFile = c.env("GIT_INDEX_FILE")
+	vs, err := guard.Staged(s.host, s.index)
+	if err != nil {
+		return err
+	}
+	return c.refuse("commit", vs)
+}
+
+// hookPrePush refuses a host push whose commits touch a claimed path.
+func (c *cli) hookPrePush(args []string) error {
+	fs := c.flagSet("pre-push")
+	from := fs.String("from", "", "remote object id, for manual use")
+	to := fs.String("to", "", "local object id, for manual use")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	remoteName := c.env("PRE_COMMIT_REMOTE_NAME")
+	if len(pos) > 0 {
+		remoteName = pos[0]
+	}
+	updates, err := c.refUpdates(*from, *to)
+	if err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	s, err := c.load()
+	if err != nil {
+		return err
+	}
+	vs, err := guard.Outgoing(s.host, s.index, updates, remoteName)
+	if err != nil {
+		return err
+	}
+	return c.refuse("push", vs)
+}
+
+// refUpdates collects what is being pushed: from flags, from the
+// pre-commit framework's variables, or from git's stdin, in that order.
+func (c *cli) refUpdates(from, to string) ([]guard.RefUpdate, error) {
+	if to == "" {
+		to = c.env("PRE_COMMIT_TO_REF")
+		from = c.env("PRE_COMMIT_FROM_REF")
+	}
+	if to != "" {
+		if from == "" {
+			from = strings.Repeat("0", 40)
+		}
+		return []guard.RefUpdate{{LocalRef: "HEAD", LocalOID: to, RemoteRef: "HEAD", RemoteOID: from}}, nil
+	}
+	return guard.ParseRefUpdates(c.o.Stdin)
+}
+
+// hookInlayPrePush runs inside an inlay's own pre-push hook: it refuses a
+// push to any host remote and a push of paths outside the inlay's claims.
+func (c *cli) hookInlayPrePush(args []string) error {
+	gitDir := c.env("GIT_DIR")
+	if gitDir == "" {
+		return errors.New("GIT_DIR is not set; this hook must be run by git")
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(c.o.Dir, gitDir)
+	}
+	r := gitx.Runner{GitDir: gitDir, Dir: c.o.Dir, Env: c.o.Env}
+	name, ok, err := r.Config("inlay.name")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("this repository is not an inlay")
+	}
+	worktree, _, err := r.Config("core.worktree")
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(worktree) {
+		worktree = filepath.Join(gitDir, worktree)
+	}
+	h, err := host.Discover(worktree, c.o.Env)
+	if err != nil {
+		return err
+	}
+	in := &inlay.Inlay{Name: name, Key: h.Key, GitDir: gitDir, Host: h}
+
+	remoteName, url := "", ""
+	if len(args) > 0 {
+		remoteName = args[0]
+	}
+	if len(args) > 1 {
+		url = args[1]
+	}
+	hostRemotes, err := remote.Configured(h.Git())
+	if err != nil {
+		return err
+	}
+	if url != "" {
+		if err := guard.CheckRemoteURL(hostRemotes, url); err != nil {
+			fmt.Fprintf(c.o.Stderr, "git-inlay: refusing to push inlay %s: %v\n", name, err)
+			return exitError{exitViolation}
+		}
+	}
+
+	m, err := in.ReadManifest()
+	if err != nil {
+		return err
+	}
+	updates, err := guard.ParseRefUpdates(c.o.Stdin)
+	if err != nil {
+		return err
+	}
+	names, err := in.RemoteNames()
+	if err != nil {
+		return err
+	}
+	paths, err := guard.OutgoingPaths(in.Git(), updates, remoteName, slices.Contains(names, remoteName))
+	if err != nil {
+		return err
+	}
+	var vs []guard.Violation
+	for _, p := range paths {
+		if _, ok := m.Owner(p); !ok {
+			vs = append(vs, guard.Violation{
+				Path:   p,
+				Inlay:  name,
+				Reason: "is in the commits being pushed but under no claim of inlay " + name,
+				Fix:    fmt.Sprintf("git inlay claim %s %q, or remove it from the commits", name, p),
+			})
+		}
+	}
+	return c.refuse("push inlay "+name, vs)
+}
+
+// refuse prints violations and returns the violation exit status.
+func (c *cli) refuse(action string, vs []guard.Violation) error {
+	if len(vs) == 0 {
+		return nil
+	}
+	fmt.Fprintf(c.o.Stderr, "git-inlay: refusing to %s: %d path(s) out of place\n", action, len(vs))
+	for _, v := range vs {
+		fmt.Fprintf(c.o.Stderr, "  %s\n", v)
+	}
+	return exitError{exitViolation}
+}
