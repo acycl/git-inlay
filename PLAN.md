@@ -442,6 +442,16 @@ public `.claude/`, a nested package's settings, a host-ignored
 - a linked worktree before `attach`: claims still bind there through the
   common dir's exclude file and hooks
 
+Hook-manager mechanisms (added 2026-10-31): scripts under `core.hooksPath`
+that call the guards, which is what husky and lefthook run, refuse leaks
+at commit and at push; the pre-commit framework's protocol, no stdin and
+the range in `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and
+`PRE_COMMIT_REMOTE_NAME`, is driven directly, including the new-branch
+case without `FROM_REF`. The tools themselves are not installed in the
+tests, so the snippets' wording is checked only by reading. A push by URL,
+which has no remote-tracking refs to subtract, scans the whole history and
+refuses a leak that an earlier `--no-verify` push already put on origin.
+
 Agent-config contract: `claude --init-only` under an isolated
 `CLAUDE_CONFIG_DIR` runs the project's `SessionStart` hooks without a
 conversation or credentials, so a hook that writes a marker proves Claude

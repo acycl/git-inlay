@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -81,9 +82,15 @@ func newFixture(t *testing.T) *fixture {
 // run executes a command and returns stdout, stderr and the exit status.
 func (f *fixture) run(dir, name string, args ...string) (string, string, int) {
 	f.t.Helper()
+	return f.runWith(dir, nil, name, args...)
+}
+
+// runWith is run with extra environment variables appended.
+func (f *fixture) runWith(dir string, extra []string, name string, args ...string) (string, string, int) {
+	f.t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = f.env
+	cmd.Env = append(slices.Clone(f.env), extra...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()
@@ -910,4 +917,94 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	if got := f.git(f.root, "status", "--porcelain"); got != "" {
 		t.Fatalf("host status after detach = %q", got)
 	}
+}
+
+// Hook scripts under core.hooksPath that call the guards, as the husky and
+// lefthook snippets do, refuse leaks at commit and at push with git's
+// stdin forwarded.
+func TestHooksPathScriptsRunGuards(t *testing.T) {
+	f := newFixture(t)
+	f.git(f.root, "config", "core.hooksPath", ".husky")
+	for name, body := range map[string]string{
+		"pre-commit": "#!/bin/sh\ngit-inlay hook pre-commit\n",
+		"pre-push":   "#!/bin/sh\ngit-inlay hook pre-push \"$@\"\n",
+	} {
+		p := filepath.Join(f.root, ".husky", name)
+		writeFile(t, p, body)
+		if err := os.Chmod(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	status := f.inlayOK(f.root, "hooks", "status")
+	contains(t, status, "managed", "hooks status")
+	contains(t, status, "inlay:claude installed", "inlay guard under a hooks path")
+
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak"), ".claude/settings.json: belongs to inlay claude", "pre-commit through the hooks path")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	contains(t, f.gitFails(f.root, "push", "-q", "origin", "main"), ".claude/settings.json: belongs to inlay claude", "pre-push through the hooks path")
+}
+
+// The pre-commit framework runs the guards with no stdin and the refs in
+// environment variables, which is what its snippet relies on.
+func TestPreCommitFrameworkProtocol(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	// pre-commit inspects the index as staged.
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.inlayFails(f.root, 1, "hook", "pre-commit"), ".claude/settings.json: belongs to inlay claude", "pre-commit via the framework")
+	f.git(f.root, "commit", "-q", "-m", "leak")
+	base := f.git(f.root, "rev-parse", "origin/main")
+	head := f.git(f.root, "rev-parse", "HEAD")
+
+	// pre-push gets the range from the environment.
+	env := []string{"PRE_COMMIT_FROM_REF=" + base, "PRE_COMMIT_TO_REF=" + head, "PRE_COMMIT_REMOTE_NAME=origin"}
+	_, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push")
+	if code != 1 {
+		t.Fatalf("pre-push via the framework: exit %d\n%s", code, errOut)
+	}
+	contains(t, errOut, ".claude/settings.json: belongs to inlay claude", "pre-push via the framework")
+
+	// A new branch has no FROM_REF; commits the remote already has are
+	// skipped, so the same leak is refused before it reaches origin and
+	// not after.
+	env = []string{"PRE_COMMIT_TO_REF=" + head, "PRE_COMMIT_REMOTE_NAME=origin"}
+	if _, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push"); code != 1 {
+		t.Fatalf("pre-push of a new branch via the framework: exit %d\n%s", code, errOut)
+	}
+	f.git(f.root, "push", "-q", "origin", "main")
+	if _, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push"); code != 0 {
+		t.Fatalf("pre-push with everything on the remote: exit %d\n%s", code, errOut)
+	}
+}
+
+// A push by URL has no remote-tracking refs to subtract, so the whole
+// history behind the update is scanned: a leak that reached a named remote
+// earlier is still refused on its way to another repository.
+func TestPushByURLScansHistory(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "hooks", "install")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	f.git(f.root, "push", "-q", "--no-verify", "origin", "main")
+	f.write("CHANGELOG.md", "x\n")
+	f.git(f.root, "add", "CHANGELOG.md")
+	f.git(f.root, "commit", "-q", "-m", "clean")
+
+	// Only the new commit goes to origin, so that push passes.
+	f.git(f.root, "push", "-q", "origin", "main")
+	mirror := f.bare("mirror")
+	contains(t, f.gitFails(f.root, "push", "-q", mirror, "main"), ".claude/settings.json: belongs to inlay claude", "push by URL")
 }
