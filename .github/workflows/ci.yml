@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: git --version
+      - run: go vet ./...
+      - run: go build ./...
+      - name: test with the race detector
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+      - name: test
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            printf 'not gofmt-clean:\n%s\n' "$out"
+            exit 1
+          fi
+
+  oldest-git:
+    name: oldest supported git
+    # Pinned: the cached git binary is linked against this image's
+    # libraries, and the cache key below names the image for that reason.
+    runs-on: ubuntu-24.04
+    env:
+      GIT_VERSION: 2.40.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        id: git-cache
+        with:
+          path: ~/git-${{ env.GIT_VERSION }}
+          key: git-${{ env.GIT_VERSION }}-ubuntu-24.04
+      - name: build git
+        if: steps.git-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev zlib1g-dev libexpat1-dev
+          curl -fsSL "https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.gz" | tar -xz
+          make -C "git-$GIT_VERSION" -j"$(nproc)" NO_TCLTK=1 NO_GETTEXT=1 NO_PERL=1 prefix="$HOME/git-$GIT_VERSION" install
+      - name: use the built git
+        run: echo "$HOME/git-$GIT_VERSION/bin" >> "$GITHUB_PATH"
+      - run: git --version
+      - run: go test -race -count=1 ./...
