@@ -350,6 +350,15 @@ func (s *session) vet(name string, cl manifest.Claim) error {
 			}
 		}
 	}
+	// Before the tracked check: a path under a submodule matches the
+	// gitlink in ls-files, and "git rm --cached" would be the wrong advice.
+	subs, err := s.host.Submodules(append(cl.Ancestors(), cl.Path)...)
+	if err != nil {
+		return err
+	}
+	for p := range subs {
+		return fmt.Errorf("%s is inside the submodule at %s", cl, p)
+	}
 	tracked, err := s.host.Tracked(cl.Pathspec())
 	if err != nil {
 		return err
@@ -367,13 +376,6 @@ func (s *session) vet(name string, cl manifest.Claim) error {
 	if src, pattern, ok := ignoreMatch(s.host.Git(), cl.Path); ok &&
 		strings.HasPrefix(pattern, "!") && !strings.HasSuffix(filepath.ToSlash(src), "info/exclude") {
 		return fmt.Errorf("%s is re-included by %s (pattern %s), which outranks the exclude file git-inlay manages, so the host cannot be made to ignore it; remove that pattern or choose another path", cl, src, pattern)
-	}
-	subs, err := s.host.Submodules(append(cl.Ancestors(), cl.Path)...)
-	if err != nil {
-		return err
-	}
-	for p := range subs {
-		return fmt.Errorf("%s is inside the submodule at %s", cl, p)
 	}
 	return nil
 }
