@@ -187,7 +187,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay init <name> [--remote <url>]` | create an empty inlay for this worktree; refuse a remote that matches a host remote |
 | `git inlay clone <url> [<name>]` | create the inlay from a remote, read its manifest, check claims against the host, check out; `<name>` defaults to the URL's basename |
 | `git inlay attach <name>... \| --all` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
-| `git inlay detach <name> [--force] [--keep-files]` | remove the inlay git dir; refuse with uncommitted or unpushed work unless forced; delete the inlay's tracked files unless `--keep-files` |
+| `git inlay detach <name> [--force] [--keep-files]` | remove the inlay git dir; refuse with uncommitted changes, stashes, or commits on no remote unless forced; delete the inlay's tracked files unless `--keep-files`, never a file the host also tracks |
 | `git inlay claim <name> <path>...` | validate, add to manifest, regenerate excludes, stage manifest and paths in the inlay |
 | `git inlay unclaim <name> <path>...` | remove from manifest, `git rm --cached` in the inlay, regenerate; warn that the files are now visible to the host |
 | `git inlay ls [<name>]` | list claims, per inlay |
@@ -359,10 +359,10 @@ sibling clones; inlay content is small, so this is accepted.
 gone, or whose registered worktree path no longer exists and is not locked
 (git keeps a locked worktree through an unmounted volume, and so does
 prune), counts each inlay's commits on no remote (`rev-list HEAD --branches
---not --remotes`, so an inlay without a remote counts every commit),
-removes the rest, and keeps those unless `--force`, printing the
-`git --git-dir=<dir> --work-tree=$C push` that clears each. There is no
-interactive confirmation. `check` reports a stale inlay, because its
+--tags --not --remotes`, so an inlay without a remote counts every commit)
+and its stash entries, which no push carries, removes the rest, and keeps
+those unless `--force`, printing the `git --git-dir=<dir> --work-tree=$C
+push` that clears each. There is no interactive confirmation. `check` reports a stale inlay, because its
 claims keep binding every worktree until it is pruned.
 
 Git refuses to start against a repository whose `core.worktree` has a
@@ -453,11 +453,18 @@ pre-granted trust could also check `permissions.allow` and
 `CLAUDE.local.md` loading, but it costs a model call per run, so it stays
 a manual pre-release step.
 
-CI: GitHub Actions on ubuntu, macos, and windows with the runner's git, plus
-one Linux job on a container with the oldest supported git. Supported floor:
-git 2.40, chosen for `--git-common-dir` and worktree stability; raise it if a
-needed feature requires more. macOS runs exercise a case-insensitive
-filesystem.
+CI (`.github/workflows/ci.yml`, added 2026-10-31): GitHub Actions on
+ubuntu, macos, and windows with the runner's git, a gofmt job, and one
+Linux job that builds git 2.40.1 from source (cached) and runs the suite
+against it. Supported floor: git 2.40, chosen for `--git-common-dir` and
+worktree stability; raise it if a needed feature requires more. macOS runs
+exercise a case-insensitive filesystem. Windows runs without the race
+detector. The Claude Code contract test skips on every runner, since none
+has the `claude` binary. Nothing has yet run on Windows; the first CI run
+is the first test of the hook shims and drive-letter paths there.
+Releases (`.github/workflows/release.yml`, `.goreleaser.yaml`) build
+linux, darwin and windows binaries for amd64 and arm64 on a `v*` tag and
+open a draft release.
 
 Verification subagents per the project conventions: `go-test-runner` and
 `go-vet-runner` after each change; `code-reviewer` before each milestone is
@@ -472,7 +479,7 @@ declared done.
 | M2 (done 2026-10-31) | Remotes | `clone`, remote normalization, I4; scenarios 3, 5 |
 | M3 (done 2026-10-31) | Guards | `check`, `hook pre-commit`, `hook pre-push`, inlay pre-push, `hooks install\|uninstall\|status`; scenarios 2, 8 |
 | M4 (done 2026-10-31) | Worktrees | worktree keys, `attach`, `prune`, union exclude; scenario 6 |
-| M5 | Lifecycle and release | `detach`, `restore`, `status`, `--porcelain`, README, goreleaser config, CI matrix; scenarios 7, 9 |
+| M5 (done 2026-10-31) | Lifecycle and release | `detach`, `restore`, `status`, `--porcelain`, README, goreleaser config, CI matrix; scenarios 7, 9 |
 
 M0 is done before any Go beyond the runner is written. If a mechanic fails,
 the design changes before code depends on it. The M0 tests stay as regression tests for the git behaviour the design
