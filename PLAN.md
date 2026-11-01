@@ -393,6 +393,46 @@ exercised:
 9. detach with and without `--keep-files`.
 10. passthrough runs with the right git dir and refuses a verb as a name.
 
+Workflow scenarios in `internal/cli/workflow_test.go` (added 2026-10-31)
+automate the dogfooding step on a host shaped like an open-source monorepo:
+a committed `.gitignore` with local-file rules, a public `CLAUDE.md` and
+`.claude/skills/`, nested packages, a submodule, a release branch and a tag
+from before the agent config existed, a foreign hook, and the global
+excludes entry Claude Code writes for `settings.local.json`. Two inlays,
+`team` and `research`, hold Claude Code settings interleaved with the
+public `.claude/`, a nested package's settings, a host-ignored
+`CLAUDE.local.md`, and research notes. After every host operation a
+`steady` check asserts that the host is clean, every inlay is clean,
+`check` passes, and the private files are byte-identical.
+
+- interleaving: `add -A` stages nothing private, inlay status shows nothing
+  public, a new file goes to whoever owns its directory, claims inside the
+  submodule are refused
+- a day of host work: branch, `pull --rebase`, rebase, `merge --no-ff`,
+  cherry-pick, amend, push, checkout of a tag and a branch that predate the
+  agent config, `reset --hard`
+- `stash -u` and `clean -fd` are harmless; `stash --all` and `clean -fdx`
+  remove the inlay's files, and `stash pop` or the inlay's own checkout
+  bring them back (M5's `restore` wraps the latter)
+- an upstream commit that adds a claimed path overwrites the inlay's copy
+  on pull; `check` reports it, the untracking commit is pushable, and
+  re-claiming the path warns that it exists in history
+- a teammate's fresh clone: regular files in place, each remote holds only
+  its own paths, edits flow between machines through the inlays alone
+- a linked worktree before `attach`: claims still bind there through the
+  common dir's exclude file and hooks
+
+Agent-config contract: `claude --init-only` under an isolated
+`CLAUDE_CONFIG_DIR` runs the project's `SessionStart` hooks without a
+conversation or credentials, so a hook that writes a marker proves Claude
+Code loaded the inlay-delivered, host-ignored `.claude/settings.json`;
+`--setting-sources user` is the negative control. The test skips on
+Windows (the marker hook is a shell command), when `claude` is not on
+PATH, or under `-short`. A full `claude -p` run with
+pre-granted trust could also check `permissions.allow` and
+`CLAUDE.local.md` loading, but it costs a model call per run, so it stays
+a manual pre-release step.
+
 CI: GitHub Actions on ubuntu, macos, and windows with the runner's git, plus
 one Linux job on a container with the oldest supported git. Supported floor:
 git 2.40, chosen for `--git-common-dir` and worktree stability; raise it if a
