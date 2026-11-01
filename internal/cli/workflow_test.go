@@ -231,6 +231,27 @@ func TestMonorepoInterleavedClaudeDir(t *testing.T) {
 		t.Fatal("the foreign commit-msg hook was touched")
 	}
 	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 5 claim(s)", "check")
+
+	// Detaching removes only the inlay's tracked files; the host's half of
+	// .claude/ and untracked files such as settings.local.json stay.
+	f.inlayOK(f.root, "team", "push", "-q")
+	if got := f.inlayOK(f.root, "detach", "team"); got != "detached inlay team; 7 file(s) removed" {
+		t.Fatalf("detach = %q", got)
+	}
+	for _, rel := range []string{".claude/skills/review/SKILL.md", "CLAUDE.md", "packages/api/.claude/settings.local.json", ".git-inlay/research.paths"} {
+		if !f.exists(rel) {
+			t.Fatalf("detach removed %s", rel)
+		}
+	}
+	for _, rel := range []string{".claude/settings.json", ".claude/skills/internal", "CLAUDE.local.md", "packages/api/.claude/settings.json", ".git-inlay/team.paths"} {
+		if f.exists(rel) {
+			t.Fatalf("detach left %s", rel)
+		}
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after detach = %q", got)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check after detach")
 }
 
 // A day of ordinary host work: branches, an upstream pull, rebase, merge,
@@ -343,10 +364,28 @@ func TestMonorepoStashAndClean(t *testing.T) {
 	for in, want := range missing {
 		contains(t, f.inlayOK(f.root, in, "status", "--porcelain"), want, "inlay "+in+" status after clean -x")
 	}
-	for _, in := range inlays {
-		f.inlayOK(f.root, in, "checkout", "-q", "--", ".")
+	out := f.inlayOK(f.root, "restore")
+	contains(t, out, "restored 5 file(s) in inlay team", "restore")
+	contains(t, out, "restored 2 file(s) in inlay research", "restore")
+	f.steady(f.root, "clean -fdx and restore", snap)
+	if got := f.inlayOK(f.root, "restore"); got != "nothing to restore" {
+		t.Fatalf("restore with nothing missing = %q", got)
 	}
-	f.steady(f.root, "clean -fdx and inlay checkout", snap)
+
+	// restore brings back only what is missing; a modified file is left
+	// alone.
+	f.write(".claude/settings.json", "edited\n")
+	if err := os.Remove(filepath.Join(f.root, "CLAUDE.local.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.inlayOK(f.root, "restore", "team"); got != "restored 1 file(s) in inlay team" {
+		t.Fatalf("selective restore = %q", got)
+	}
+	if f.read(".claude/settings.json") != "edited\n" {
+		t.Fatal("restore overwrote a modified file")
+	}
+	f.inlayOK(f.root, "team", "checkout", "-q", "--", ".claude/settings.json")
+	f.steady(f.root, "selective restore", snap)
 }
 
 // An upstream commit that adds a claimed path is the one host operation

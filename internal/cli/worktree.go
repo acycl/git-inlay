@@ -206,11 +206,16 @@ func (c *cli) prune(args []string) error {
 	}
 	var kept []inlay.Entry
 	for _, e := range stale {
-		n, err := unpushed(inlay.Elsewhere(s.host, e.GitDir))
+		run := inlay.Elsewhere(s.host, e.GitDir)
+		n, err := unpushed(run)
 		if err != nil {
 			return err
 		}
-		remove := n == 0 || *force
+		st, err := stashes(run)
+		if err != nil {
+			return err
+		}
+		remove := (n == 0 && st == 0) || *force
 		action := "removed"
 		switch {
 		case *dryRun && remove:
@@ -220,11 +225,17 @@ func (c *cli) prune(args []string) error {
 		case !remove:
 			action = "kept"
 		}
-		state := ""
+		var state []string
 		if n > 0 {
-			state = fmt.Sprintf(" (%d unpushed commit(s))", n)
+			state = append(state, fmt.Sprintf("%d unpushed commit(s)", n))
 		}
-		c.printf("%s\t%s\t%s%s\n", e.Key, e.Name, action, state)
+		if st > 0 {
+			state = append(state, fmt.Sprintf("%d stash(es)", st))
+		}
+		if len(state) > 0 {
+			action += " (" + strings.Join(state, ", ") + ")"
+		}
+		c.printf("%s\t%s\t%s\n", e.Key, e.Name, action)
 		if *dryRun {
 			continue
 		}
@@ -248,12 +259,13 @@ func (c *cli) prune(args []string) error {
 	if len(kept) == 0 {
 		return nil
 	}
-	fmt.Fprintf(c.o.Stderr, "git-inlay: kept %d inlay(s) whose commits are on no remote\n", len(kept))
+	fmt.Fprintf(c.o.Stderr, "git-inlay: kept %d inlay(s) with work that exists nowhere else\n", len(kept))
 	for _, e := range kept {
 		run := inlay.Elsewhere(s.host, e.GitDir)
 		// --work-tree keeps git from resolving the inlay's missing worktree.
 		raw := fmt.Sprintf("git --git-dir=%s --work-tree=%s", e.GitDir, s.host.CommonDir)
-		if _, hasRemote, _ := run.Config("remote.origin.url"); !hasRemote {
+		_, hasRemote, _ := run.Config("remote.origin.url")
+		if !hasRemote {
 			fmt.Fprintf(c.o.Stderr, "  %s has no remote; add one with: %s remote add origin <url>\n", e.Name, raw)
 			continue
 		}
@@ -261,7 +273,12 @@ func (c *cli) prune(args []string) error {
 		if branch == "" {
 			branch = "<branch>"
 		}
-		fmt.Fprintf(c.o.Stderr, "  %s: push with: %s push origin %s\n", e.Name, raw, branch)
+		if n, _ := unpushed(run); n > 0 {
+			fmt.Fprintf(c.o.Stderr, "  %s: push with: %s push origin %s\n", e.Name, raw, branch)
+		}
+		if st, _ := stashes(run); st > 0 {
+			fmt.Fprintf(c.o.Stderr, "  %s has %d stash(es), which push does not carry; save them with: %s push origin refs/stash:refs/heads/%s-stash\n", e.Name, st, raw, branch)
+		}
 	}
 	fmt.Fprintf(c.o.Stderr, "or remove them anyway with: git inlay prune --force\n")
 	return exitError{exitViolation}
@@ -291,12 +308,22 @@ func (s *session) worktreeGone(key string) (bool, error) {
 	return errors.Is(err, os.ErrNotExist), nil
 }
 
-// unpushed counts commits on the inlay's branches, and on a detached HEAD,
-// that no remote has. With no remote configured, every commit counts.
+// stashes counts the inlay's stash entries, which no push carries.
+func stashes(run gitx.Runner) (int, error) {
+	out, err := run.Output("stash", "list")
+	if err != nil || out == "" {
+		return 0, err
+	}
+	return len(strings.Split(out, "\n")), nil
+}
+
+// unpushed counts commits on the inlay's branches and tags, and on a
+// detached HEAD, that no remote has. With no remote configured, every
+// commit counts.
 func unpushed(run gitx.Runner) (int, error) {
 	// The trailing -- matters: the runner sits in the common dir, where a
 	// file named HEAD makes the revision ambiguous otherwise.
-	args := []string{"rev-list", "--count", "--branches", "--not", "--remotes", "--"}
+	args := []string{"rev-list", "--count", "--branches", "--tags", "--not", "--remotes", "--"}
 	if ok, err := run.Succeeds("rev-parse", "--verify", "-q", "HEAD"); err != nil {
 		return 0, err
 	} else if ok {

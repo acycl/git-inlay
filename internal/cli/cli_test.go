@@ -654,6 +654,10 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 	}
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check in main with a worktree claim")
 
+	// A stash in the worktree's copy is work too.
+	writeFile(t, filepath.Join(wt, ".claude", "settings.json"), "{\"stash\":1}\n")
+	f.inlayOK(wt, "claude", "stash", "-q")
+
 	// --all brings over what is left; local has no remote to reuse.
 	out, errOut, code = f.inlay(wt, "attach", "--all")
 	if code != 0 {
@@ -690,7 +694,7 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 	}
 	contains(t, f.inlayFails(f.root, 1, "check"), "worktree wt/wt, which no longer exists", "check with a stale inlay")
 	out = f.inlayOK(f.root, "prune", "--dry-run")
-	contains(t, out, "wt/wt\tclaude\twould keep (1 unpushed commit(s))", "dry run")
+	contains(t, out, "wt/wt\tclaude\twould keep (1 unpushed commit(s), 1 stash(es))", "dry run")
 	contains(t, out, "wt/wt\tlocal\twould keep (2 unpushed commit(s))", "dry run")
 	if !f.exists(".git/inlays/wt/wt/claude") {
 		t.Fatal("a dry run removed an inlay")
@@ -730,6 +734,15 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The stash still holds claude back, with its own advice.
+	out, errOut, code = f.inlay(f.root, "prune")
+	if code != 1 {
+		t.Fatalf("prune with a stash: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	contains(t, out, "wt/wt\tclaude\tkept (1 stash(es))", "prune with a stash")
+	contains(t, errOut, "claude has 1 stash(es)", "prune advice for a stash")
+	stale("stash", "drop", "-q")
+
 	// The pushed inlay goes; the other stays until forced.
 	out, errOut, code = f.inlay(f.root, "prune")
 	if code != 1 {
@@ -749,4 +762,152 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 		t.Fatal("the main worktree still ignores the pruned worktree's claim")
 	}
 	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 2 claim(s)", "check after prune")
+}
+
+// Scenario 9: detach with and without --keep-files, refusing uncommitted
+// and unpushed work unless forced.
+func TestDetach(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "init", "local")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "local", "notes")
+	f.inlayOK(f.root, "local", "commit", "-q", "-m", "notes")
+
+	contains(t, f.inlayFails(f.root, 1, "detach", "nope"), "no inlay named", "detach of an unknown inlay")
+	f.inlayFails(f.root, 2, "detach")
+	contains(t, f.inlayFails(f.root, 1, "detach", "claude"), "commit(s) on no remote", "detach with unpushed commits")
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+	f.write(".claude/settings.json", "{\"edited\":true}\n")
+	contains(t, f.inlayFails(f.root, 1, "detach", "claude"), "uncommitted changes", "detach with a dirty tree")
+	f.inlayOK(f.root, "claude", "checkout", "-q", "--", ".claude/settings.json")
+	f.write(".claude/settings.json", "{\"stashed\":true}\n")
+	f.inlayOK(f.root, "claude", "stash", "-q")
+	contains(t, f.inlayFails(f.root, 1, "detach", "claude"), "has 1 stash(es)", "detach with a stash")
+	f.inlayOK(f.root, "claude", "stash", "drop", "-q")
+
+	if got := f.inlayOK(f.root, "detach", "claude"); got != "detached inlay claude; 2 file(s) removed" {
+		t.Fatalf("detach = %q", got)
+	}
+	for _, rel := range []string{".claude", ".git-inlay/claude.paths", ".git/inlays/main/claude"} {
+		if f.exists(rel) {
+			t.Fatalf("%s survived detach", rel)
+		}
+	}
+	if !f.exists(".git-inlay/local.paths") {
+		t.Fatal("detach removed another inlay's manifest")
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "local\tnotes/" {
+		t.Fatalf("ls after detach = %q", got)
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after detach = %q", got)
+	}
+	if strings.Contains(f.read(".git/info/exclude"), "/.claude\n") {
+		t.Fatal("the detached inlay's claim is still excluded")
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check after detach")
+
+	contains(t, f.inlayFails(f.root, 1, "detach", "local"), "has no remote", "detach of an inlay without a remote")
+	_, errOut, code := f.inlay(f.root, "detach", "local", "--force", "--keep-files")
+	if code != 0 {
+		t.Fatalf("detach --force --keep-files: exit %d\n%s", code, errOut)
+	}
+	contains(t, errOut, "visible to the host as untracked", "keep-files warning")
+	if !f.exists("notes/a.md") || !f.exists(".git-inlay/local.paths") {
+		t.Fatal("--keep-files did not keep the files")
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "?? .git-inlay/\n?? notes/" {
+		t.Fatalf("host status after a kept detach = %q", got)
+	}
+	// With no inlay left, the managed block is gone from the host exclude.
+	if strings.Contains(f.read(".git/info/exclude"), "git-inlay") {
+		t.Fatal("the managed block survived the last detach")
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "no inlays are attached to this worktree" {
+		t.Fatalf("ls after the last detach = %q", got)
+	}
+}
+
+// status reports branch, upstream relation and tree state per inlay, with
+// --fetch for the remote's view; --porcelain on ls, which and status gives
+// stable tab-separated lines.
+func TestStatusAndPorcelain(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	if got := f.inlayOK(f.root, "status"); got != "no inlays are attached to this worktree" {
+		t.Fatalf("status with no inlays = %q", got)
+	}
+	if got := f.inlayOK(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("status --porcelain with no inlays = %q", got)
+	}
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.inlayOK(f.root, "init", "local")
+	if got, want := f.inlayOK(f.root, "status"), "claude\tmain\tno upstream\tclean\nlocal\tmain\tno remote\tclean"; got != want {
+		t.Fatalf("status = %q, want %q", got, want)
+	}
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+	contains(t, f.inlayOK(f.root, "status"), "claude\tmain\tup to date\tclean", "status when pushed")
+	f.write(".claude/settings.json", "{\"a\":1}\n")
+	f.write(".claude/new.md", "n\n")
+	contains(t, f.inlayOK(f.root, "status"), "claude\tmain\tup to date\t1 changed, 1 untracked", "status with a dirty tree")
+	f.inlayOK(f.root, "claude", "add", "-A")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "more")
+	contains(t, f.inlayOK(f.root, "status"), "claude\tmain\tahead 1\tclean", "status when ahead")
+	contains(t, f.inlayOK(f.root, "status", "--porcelain"), "claude\tmain\torigin/main\t1\t0\t0\t0", "porcelain status")
+
+	// Someone else pushes to the private remote.
+	peer := filepath.Join(f.base, "peer")
+	f.git(f.base, "clone", "-q", private, peer)
+	writeFile(t, filepath.Join(peer, ".claude", "settings.json"), "{\"peer\":1}\n")
+	f.git(peer, "commit", "-q", "-a", "-m", "peer")
+	f.git(peer, "push", "-q", "origin", "main")
+	contains(t, f.inlayOK(f.root, "status"), "claude\tmain\tahead 1\tclean", "status before fetch")
+	contains(t, f.inlayOK(f.root, "status", "--fetch"), "claude\tmain\tahead 1, behind 1\tclean", "status after fetch")
+	contains(t, f.inlayOK(f.root, "status", "--porcelain"), "local\tmain\t\t0\t0\t0\t0", "porcelain status without a remote")
+
+	if got := f.inlayOK(f.root, "ls", "--porcelain"); got != "claude\t.claude/" {
+		t.Fatalf("ls --porcelain = %q", got)
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "claude\t.claude/\nlocal\t(no claims)" {
+		t.Fatalf("ls = %q", got)
+	}
+	if got := f.inlayOK(f.root, "which", "--porcelain", ".claude/new.md", "README.md"); got != ".claude/new.md\tclaude\nREADME.md\thost" {
+		t.Fatalf("which --porcelain = %q", got)
+	}
+}
+
+// detach never deletes a file the host also tracks, which an upstream
+// commit at a claimed path can bring about; check reports that instead.
+func TestDetachLeavesHostTrackedFiles(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write(".claude/settings.json", "{}\n")
+	f.write(".claude/other.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "-m", "leak")
+
+	out, errOut, code := f.inlay(f.root, "detach", "claude")
+	if code != 0 {
+		t.Fatalf("detach: exit %d\n%s", code, errOut)
+	}
+	contains(t, out, "detached inlay claude; 2 file(s) removed", "detach output")
+	contains(t, errOut, "left 1 file(s) the host also tracks: .claude/settings.json", "detach warning")
+	if !f.exists(".claude/settings.json") || f.exists(".claude/other.json") {
+		t.Fatal("detach deleted the wrong files")
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after detach = %q", got)
+	}
 }

@@ -52,18 +52,21 @@ const usage = `usage: git inlay <command> [args]
 Keep private sets of files tracked in their own git repositories while they
 live inside this repository's working tree.
 
-  init <name> [--remote <url>]    create an empty inlay for this worktree
-  clone <url> [<name>]            attach an inlay from its remote
-  attach <name>... | --all        copy inlays from another worktree
-  claim <name> <path>...          give paths to an inlay
-  unclaim <name> <path>...        take paths back from an inlay
-  ls [<name>]                     list claims
-  which <path>...                 report who owns each path
-  check [--staged]                verify every invariant
-  prune [--dry-run] [--force]     remove inlays whose worktree is gone
-  hooks install|uninstall|status  manage the host's leak guards
-  <name> <git command> [args]     run git against an inlay
-  version                         print versions
+  init <name> [--remote <url>]            create an empty inlay for this worktree
+  clone <url> [<name>]                    attach an inlay from its remote
+  attach <name>... | --all                copy inlays from another worktree
+  detach <name> [--force] [--keep-files]  remove an inlay from this worktree
+  claim <name> <path>...                  give paths to an inlay
+  unclaim <name> <path>...                take paths back from an inlay
+  ls [<name>] [--porcelain]               list claims
+  which <path>... [--porcelain]           report who owns each path
+  status [--fetch] [--porcelain]          short status of every inlay here
+  check [--staged]                        verify every invariant
+  restore [<name>]                        re-check out missing inlay files
+  prune [--dry-run] [--force]             remove inlays whose worktree is gone
+  hooks install|uninstall|status          manage the host's leak guards
+  <name> <git command> [args]             run git against an inlay
+  version                                 print versions
 
 Inlay state lives under .git/inlays. Nothing is ever added to the host's
 commits: the host ignores every claimed path through .git/info/exclude.
@@ -142,6 +145,12 @@ func (c *cli) dispatch(args []string) error {
 		return c.attach(rest)
 	case "prune":
 		return c.prune(rest)
+	case "detach":
+		return c.detach(rest)
+	case "status":
+		return c.status(rest)
+	case "restore":
+		return c.restore(rest)
 	case "claim":
 		return c.claim(rest)
 	case "unclaim":

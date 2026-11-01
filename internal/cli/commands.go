@@ -194,22 +194,31 @@ func (c *cli) unclaim(args []string) error {
 
 // ls lists claims.
 func (c *cli) ls(args []string) error {
-	if len(args) > 1 {
-		return usagef("usage: git inlay ls [<name>]")
+	fs := c.flagSet("ls")
+	porcelain := fs.Bool("porcelain", false, "machine-readable output: one name<TAB>claim line per claim")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) > 1 {
+		return usagef("usage: git inlay ls [<name>] [--porcelain]")
 	}
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
 	entries := s.mine()
-	if len(args) == 1 {
-		e, err := s.entry(args[0])
+	if len(pos) == 1 {
+		e, err := s.entry(pos[0])
 		if err != nil {
 			return err
 		}
 		entries = []inlay.Entry{e}
 	}
 	if len(entries) == 0 {
+		if *porcelain {
+			return nil
+		}
 		c.printf("no inlays are attached to this worktree\n")
 		if names := s.siblingNames(); len(names) > 0 {
 			c.printf("attached in other worktrees: %s; copy them here with: git inlay attach --all\n", strings.Join(names, ", "))
@@ -217,7 +226,7 @@ func (c *cli) ls(args []string) error {
 		return nil
 	}
 	for _, e := range entries {
-		if len(e.Manifest.Claims) == 0 {
+		if len(e.Manifest.Claims) == 0 && !*porcelain {
 			c.printf("%s\t(no claims)\n", e.Name)
 		}
 		for _, cl := range e.Manifest.Claims {
@@ -229,14 +238,22 @@ func (c *cli) ls(args []string) error {
 
 // which reports who owns each path: an inlay, the host, or nobody.
 func (c *cli) which(args []string) error {
-	if len(args) == 0 {
-		return usagef("usage: git inlay which <path>...")
+	// --porcelain is accepted for symmetry; the output is already one
+	// path<TAB>owner line per argument.
+	fs := c.flagSet("which")
+	fs.Bool("porcelain", false, "machine-readable output")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) == 0 {
+		return usagef("usage: git inlay which <path>... [--porcelain]")
 	}
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
-	for _, p := range args {
+	for _, p := range pos {
 		rel, err := s.host.Rel(c.o.Dir, p)
 		if err != nil {
 			return err
