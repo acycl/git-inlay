@@ -40,11 +40,7 @@ func (c *cli) init(args []string) error {
 		return err
 	}
 	if *remoteURL != "" {
-		hostRemotes, err := remote.Configured(s.host.Git())
-		if err != nil {
-			return err
-		}
-		if err := guard.CheckRemoteURL(hostRemotes, s.resolveURL(*remoteURL)); err != nil {
+		if err := s.checkRemote(*remoteURL); err != nil {
 			return err
 		}
 	}
@@ -215,6 +211,9 @@ func (c *cli) ls(args []string) error {
 	}
 	if len(entries) == 0 {
 		c.printf("no inlays are attached to this worktree\n")
+		if names := s.siblingNames(); len(names) > 0 {
+			c.printf("attached in other worktrees: %s; copy them here with: git inlay attach --all\n", strings.Join(names, ", "))
+		}
 		return nil
 	}
 	for _, e := range entries {
@@ -308,6 +307,17 @@ func (c *cli) check(args []string) error {
 					Fix:    "git inlay hooks install"})
 			}
 		}
+		for _, e := range s.entries {
+			gone, err := s.worktreeGone(e.Key)
+			if err != nil {
+				return err
+			}
+			if gone {
+				vs = append(vs, guard.Violation{Path: e.Name, Inlay: e.Name,
+					Reason: fmt.Sprintf("is attached to worktree %s, which no longer exists, so its claims still bind every worktree", e.Key),
+					Fix:    "git inlay prune"})
+			}
+		}
 		for _, cl := range s.index.Claims() {
 			ok, err := s.host.Git().Succeeds("check-ignore", "-q", "--no-index", "--", cl.Path)
 			if err != nil {
@@ -347,29 +357,13 @@ func (c *cli) clone(args []string) error {
 	if err := s.refuseSparse(); err != nil {
 		return err
 	}
-	hostRemotes, err := remote.Configured(s.host.Git())
+	if err := s.checkRemote(url); err != nil {
+		return err
+	}
+	tmp, t, cleanup, err := s.stage()
 	if err != nil {
 		return err
 	}
-	if err := guard.CheckRemoteURL(hostRemotes, s.resolveURL(url)); err != nil {
-		return err
-	}
-
-	parent := filepath.Join(s.host.InlaysDir(), filepath.FromSlash(s.host.Key))
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp(parent, ".clone-")
-	if err != nil {
-		return err
-	}
-	cleanup := func() { os.RemoveAll(tmp) }
-
-	if err := s.host.Git().Run("init", "-q", "--bare", "-b", "main", tmp); err != nil {
-		cleanup()
-		return err
-	}
-	t := gitx.Runner{GitDir: tmp, Dir: s.host.Root, Env: s.host.Env}
 	if err := t.Run("remote", "add", "origin", url); err != nil {
 		cleanup()
 		return err
@@ -394,28 +388,75 @@ func (c *cli) clone(args []string) error {
 		cleanup()
 		return fmt.Errorf("the repository at %s is the inlay %q, not %q", url, name, args[1])
 	}
-	final := inlay.Dir(s.host, s.host.Key, name)
-	if _, err := os.Stat(final); err == nil {
-		cleanup()
-		return fmt.Errorf("inlay %q is already attached to this worktree", name)
-	}
-	m, err := inlay.ManifestAt(t, name, "origin/"+branch)
+	m, err := s.vetTree(t, name, "origin/"+branch, url)
 	if err != nil {
 		cleanup()
 		return err
 	}
+	in, err := s.place(tmp, name, m, "checkout", "-q", "-b", branch, "--track", "origin/"+branch)
+	if err != nil {
+		cleanup()
+		return err
+	}
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	c.printf("attached inlay %s from %s (branch %s, %d claims)\n", name, url, branch, len(m.Claims))
+	s.attached(in, m)
+	return nil
+}
+
+// checkRemote applies I4 to a candidate inlay remote URL.
+func (s *session) checkRemote(url string) error {
+	hostRemotes, err := remote.Configured(s.host.Git())
+	if err != nil {
+		return err
+	}
+	return guard.CheckRemoteURL(hostRemotes, s.resolveURL(url))
+}
+
+// stage creates the temporary bare repository that clone and attach fetch
+// into. It lives under the inlays directory, so placing it is a rename.
+func (s *session) stage() (tmp string, t gitx.Runner, cleanup func(), err error) {
+	parent := filepath.Join(s.host.InlaysDir(), filepath.FromSlash(s.host.Key))
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", gitx.Runner{}, nil, err
+	}
+	tmp, err = os.MkdirTemp(parent, ".clone-")
+	if err != nil {
+		return "", gitx.Runner{}, nil, err
+	}
+	cleanup = func() { os.RemoveAll(tmp) }
+	if err := s.host.Git().Run("init", "-q", "--bare", "-b", "main", tmp); err != nil {
+		cleanup()
+		return "", gitx.Runner{}, nil, err
+	}
+	return tmp, gitx.Runner{GitDir: tmp, Dir: s.host.Root, Env: s.host.Env}, cleanup, nil
+}
+
+// vetTree reads the manifest of inlay name at rev in the staged repository
+// t and checks the tree there against this worktree: no inlay may already
+// be attached under the name, every claim must pass vet, every tracked
+// path must be under a claim, and nothing may sit where checkout would
+// write. source says where the tree came from, for messages.
+func (s *session) vetTree(t gitx.Runner, name, rev, source string) (*manifest.Manifest, error) {
+	if _, err := os.Stat(inlay.Dir(s.host, s.host.Key, name)); err == nil {
+		return nil, fmt.Errorf("inlay %q is already attached to this worktree", name)
+	}
+	m, err := inlay.ManifestAt(t, name, rev)
+	if err != nil {
+		return nil, err
+	}
 	for _, cl := range m.Claims {
 		if err := s.vet(name, cl); err != nil {
-			cleanup()
-			return err
+			return nil, err
 		}
 	}
 	// Checkout silently overwrites ignored files, and a host .gitignore may
 	// well cover claimed paths, so refuse collisions here instead.
-	files, err := t.OutputZ("ls-tree", "-r", "-z", "--name-only", "origin/"+branch)
+	files, err := t.OutputZ("ls-tree", "-r", "-z", "--name-only", rev)
 	if err != nil {
-		cleanup()
-		return err
+		return nil, err
 	}
 	var outside, existing, blocking []string
 	checkedAncestor := map[string]bool{}
@@ -437,46 +478,50 @@ func (c *cli) clone(args []string) error {
 			}
 		}
 	}
-	if len(outside) > 0 {
-		cleanup()
-		return fmt.Errorf("%s tracks paths outside its claims (%s); fix that inlay before attaching it", url, summarize(outside))
+	switch {
+	case len(outside) > 0:
+		return nil, fmt.Errorf("%s tracks paths outside its claims (%s); fix that inlay before attaching it", source, summarize(outside))
+	case len(existing) > 0:
+		return nil, fmt.Errorf("these files already exist in the working tree and would be overwritten: %s; move them aside and try again", summarize(existing))
+	case len(blocking) > 0:
+		return nil, fmt.Errorf("these files are in the way of the inlay's directories and would be deleted: %s; move them aside and try again", summarize(blocking))
 	}
-	if len(existing) > 0 {
-		cleanup()
-		return fmt.Errorf("these files already exist in the working tree and would be overwritten: %s; move them aside and run the clone again", summarize(existing))
-	}
-	if len(blocking) > 0 {
-		cleanup()
-		return fmt.Errorf("these files are in the way of the inlay's directories and would be deleted: %s; move them aside and run the clone again", summarize(blocking))
-	}
+	return m, nil
+}
+
+// place moves the staged repository to its final location, adopts it as
+// inlay name and runs the checkout command that populates the tree. Any
+// failure removes the inlay again, so a half-attached inlay never remains.
+func (s *session) place(tmp, name string, m *manifest.Manifest, checkout ...string) (*inlay.Inlay, error) {
+	final := inlay.Dir(s.host, s.host.Key, name)
 	if err := os.Rename(tmp, final); err != nil {
-		cleanup()
-		return err
+		return nil, err
 	}
 	in, err := inlay.Adopt(s.host, name, final)
+	if err == nil {
+		err = in.WriteExclude(m)
+	}
+	if err == nil {
+		if err = in.Git().Run(checkout...); err != nil {
+			err = fmt.Errorf("%w\nmove the files it lists aside and try again", err)
+		}
+	}
 	if err != nil {
 		os.RemoveAll(final)
-		return err
+		return nil, err
 	}
-	if err := in.WriteExclude(m); err != nil {
-		os.RemoveAll(final)
-		return err
-	}
-	if err := in.Git().Run("checkout", "-q", "-b", branch, "--track", "origin/"+branch); err != nil {
-		os.RemoveAll(final)
-		return fmt.Errorf("%w\nmove the files it lists aside and run the clone again", err)
-	}
-	if err := s.refresh(); err != nil {
-		return err
-	}
-	c.printf("attached inlay %s from %s (branch %s, %d claims)\n", name, url, branch, len(m.Claims))
+	return in, nil
+}
+
+// attached prints the claims of a newly attached inlay and the warnings
+// that apply to them.
+func (s *session) attached(in *inlay.Inlay, m *manifest.Manifest) {
 	for _, cl := range m.Claims {
-		c.printf("  %s\n", cl)
+		s.c.printf("  %s\n", cl)
 	}
 	s.warnIgnored(in, m.Claims)
 	s.warnHistory(m.Claims)
 	s.hooksReminder()
-	return nil
 }
 
 // defaultBranch asks the remote which branch its HEAD points at, falling

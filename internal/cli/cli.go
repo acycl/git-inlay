@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -53,11 +54,13 @@ live inside this repository's working tree.
 
   init <name> [--remote <url>]    create an empty inlay for this worktree
   clone <url> [<name>]            attach an inlay from its remote
+  attach <name>... | --all        copy inlays from another worktree
   claim <name> <path>...          give paths to an inlay
   unclaim <name> <path>...        take paths back from an inlay
   ls [<name>]                     list claims
   which <path>...                 report who owns each path
   check [--staged]                verify every invariant
+  prune [--dry-run] [--force]     remove inlays whose worktree is gone
   hooks install|uninstall|status  manage the host's leak guards
   <name> <git command> [args]     run git against an inlay
   version                         print versions
@@ -135,6 +138,10 @@ func (c *cli) dispatch(args []string) error {
 		return c.init(rest)
 	case "clone":
 		return c.clone(rest)
+	case "attach":
+		return c.attach(rest)
+	case "prune":
+		return c.prune(rest)
 	case "claim":
 		return c.claim(rest)
 	case "unclaim":
@@ -276,6 +283,29 @@ func (s *session) refresh() error {
 	}
 	s.verifyExcluded()
 	return nil
+}
+
+// rewriteHost regenerates the managed block from the inlays that remain
+// after one was removed, and drops the block when none are left.
+func (s *session) rewriteHost() error {
+	if err := s.reload(); err != nil {
+		return err
+	}
+	if len(s.entries) > 0 {
+		return exclude.WriteHost(s.host.ExcludeFile(), s.index.Claims())
+	}
+	data, err := os.ReadFile(s.host.ExcludeFile())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	stripped := exclude.Strip(data)
+	if bytes.Equal(stripped, data) {
+		return nil
+	}
+	return os.WriteFile(s.host.ExcludeFile(), stripped, 0o644)
 }
 
 // mine returns the entries attached to the current worktree.

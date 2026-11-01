@@ -442,10 +442,10 @@ func TestMonorepoFreshCloneByTeammate(t *testing.T) {
 	}
 }
 
-// Until M4's attach, a linked worktree has no inlays of its own, but the
-// claims still bind there: the common dir's exclude file and hooks apply to
-// every worktree.
-func TestMonorepoLinkedWorktreeHonoursClaims(t *testing.T) {
+// A linked worktree binds the claims before anything is attached there,
+// through the common dir's exclude file and hooks; attach --all then brings
+// every inlay over, and prune cleans up once the worktree is gone.
+func TestMonorepoLinkedWorktree(t *testing.T) {
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -458,8 +458,25 @@ func TestMonorepoLinkedWorktreeHonoursClaims(t *testing.T) {
 	writeFile(t, filepath.Join(wt, ".claude", "settings.json"), "{}\n")
 	f.git(wt, "add", "-f", ".claude/settings.json")
 	contains(t, f.gitFails(wt, "commit", "-q", "-m", "leak from a worktree"), ".claude/settings.json: belongs to inlay team", "pre-commit in a linked worktree")
+	f.git(wt, "reset", "-q")
+
+	// The stray file would be overwritten, so team is refused; research,
+	// attached first, stays attached.
+	contains(t, f.inlayFails(wt, 1, "attach", "--all"), "would be overwritten: .claude/settings.json", "attach over a stray file")
+	contains(t, f.inlayOK(wt, "ls"), "research\tdocs/research/", "research attached before the refusal")
+	if err := os.Remove(filepath.Join(wt, ".claude", "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, f.inlayOK(wt, "attach", "--all"), "attached inlay team from worktree main (branch main, 4 claims)", "attach --all")
+	f.steady(wt, "attach --all", snap)
+	f.steady(f.root, "attach --all in the worktree", snap)
+
 	f.git(f.root, "worktree", "remove", "--force", wt)
-	f.steady(f.root, "worktree add and remove", snap)
+	contains(t, f.inlayFails(f.root, 1, "check"), "no longer exists", "check after worktree remove")
+	out := f.inlayOK(f.root, "prune")
+	contains(t, out, "wt/wt\tresearch\tremoved", "prune")
+	contains(t, out, "wt/wt\tteam\tremoved", "prune")
+	f.steady(f.root, "prune", snap)
 }
 
 // Claude Code reads hooks from a settings file the host ignores, which is

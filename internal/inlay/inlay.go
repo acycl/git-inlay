@@ -123,7 +123,19 @@ func (i *Inlay) Git() gitx.Runner { return i.GitAt(i.Host.Root) }
 // GitAt returns a runner pinned to the inlay, running in dir, so relative
 // paths on a passthrough command resolve as the user expects.
 func (i *Inlay) GitAt(dir string) gitx.Runner {
+	if i.Host.Root == "" {
+		return Elsewhere(i.Host, i.GitDir)
+	}
 	return gitx.Runner{GitDir: i.GitDir, WorkTree: i.Host.Root, Dir: dir, Env: i.Host.Env}
+}
+
+// Elsewhere returns a runner for an inlay attached to another worktree, or
+// one whose worktree is gone. The work tree is pinned to the common dir,
+// which always exists, so git never resolves the inlay's core.worktree: a
+// missing parent directory there makes git refuse to start at all. Nothing
+// run through this runner may touch a tree.
+func Elsewhere(h *host.Host, gitDir string) gitx.Runner {
+	return gitx.Runner{GitDir: gitDir, WorkTree: h.CommonDir, Dir: h.CommonDir, Env: h.Env}
 }
 
 // ManifestFile is the absolute path of the manifest in the working tree.
@@ -241,7 +253,7 @@ func All(h *host.Host) ([]Entry, error) {
 				e.Inlay = &Inlay{Name: e.Name, Key: key, GitDir: gitDir, Host: h}
 				e.Manifest, err = e.Inlay.ReadManifest()
 			} else {
-				e.Manifest, err = ManifestAt(gitx.Runner{GitDir: gitDir, Env: h.Env}, e.Name, "HEAD")
+				e.Manifest, err = ManifestAt(Elsewhere(h, gitDir), e.Name, "HEAD")
 			}
 			if err != nil {
 				return fmt.Errorf("inlay %s in worktree %s: %w", e.Name, key, err)

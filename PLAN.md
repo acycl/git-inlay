@@ -186,7 +186,7 @@ command line are relative to the current directory and are normalized against
 |---|---|
 | `git inlay init <name> [--remote <url>]` | create an empty inlay for this worktree; refuse a remote that matches a host remote |
 | `git inlay clone <url> [<name>]` | create the inlay from a remote, read its manifest, check claims against the host, check out; `<name>` defaults to the URL's basename |
-| `git inlay attach <name>` | in a linked worktree: create the inlay from the sibling in another worktree, pointing its remote at the real URL |
+| `git inlay attach <name>... \| --all` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
 | `git inlay detach <name> [--force] [--keep-files]` | remove the inlay git dir; refuse with uncommitted or unpushed work unless forced; delete the inlay's tracked files unless `--keep-files` |
 | `git inlay claim <name> <path>...` | validate, add to manifest, regenerate excludes, stage manifest and paths in the inlay |
 | `git inlay unclaim <name> <path>...` | remove from manifest, `git rm --cached` in the inlay, regenerate; warn that the files are now visible to the host |
@@ -195,7 +195,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay status [--fetch]` | short status of every inlay in this worktree, plus ahead/behind |
 | `git inlay check [--staged]` | run every invariant from section 6; non-zero exit on any violation |
 | `git inlay restore [<name>]` | re-check out tracked inlay files that are missing from the tree, for example after `git clean -x` |
-| `git inlay prune [--dry-run]` | delete inlay git dirs whose host worktree no longer exists; refuse those with unpushed commits unless forced |
+| `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
 | `git inlay hooks install\|uninstall\|status` | manage the host hook shims (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above |
@@ -303,9 +303,15 @@ inlays, and then checks out with `git checkout` without `-f`, so git refuses
 to overwrite untracked host files at claimed paths. That refusal is surfaced
 with the paths and a hint to move them aside.
 
-`attach` is `clone` with the sibling inlay's git dir as the fetch source, the
-remote URL copied from the sibling, and the sibling's current branch checked
-out.
+`attach` is `clone` with the sibling inlay's git dir as the fetch source. The
+sibling's branches are fetched into a scratch `refs/sibling/` namespace, its
+remote-tracking refs and tags as they are, and its `origin` URL is reused;
+the sibling's current branch is then created from the scratch ref, set to
+track `origin/<branch>` when that exists, and the scratch refs are deleted.
+Only commits travel: uncommitted changes in the sibling are reported, not
+copied. The main worktree's copy is preferred when several siblings exist,
+and a sibling whose own worktree is gone still serves, which is how an
+orphaned inlay's history is recovered.
 
 ### 7.3 Host hooks
 
@@ -350,8 +356,22 @@ owns the `.git` file at the worktree root. Objects are duplicated between
 sibling clones; inlay content is small, so this is accepted.
 
 `prune` lists `$C/inlays/wt/<id>/` directories whose `$C/worktrees/<id>` is
-gone, reports unpushed commits per inlay, and deletes only with
-confirmation or `--force`.
+gone, or whose registered worktree path no longer exists and is not locked
+(git keeps a locked worktree through an unmounted volume, and so does
+prune), counts each inlay's commits on no remote (`rev-list HEAD --branches
+--not --remotes`, so an inlay without a remote counts every commit),
+removes the rest, and keeps those unless `--force`, printing the
+`git --git-dir=<dir> --work-tree=$C push` that clears each. There is no
+interactive confirmation. `check` reports a stale inlay, because its
+claims keep binding every worktree until it is pruned.
+
+Git refuses to start against a repository whose `core.worktree` has a
+missing parent directory, so every runner for an inlay in another or a
+vanished worktree pins `--work-tree` to the common dir, which always
+exists, and the advised push does the same. The inlay pre-push guard
+answers from the common dir (`inlay.host`) whenever the worktree is gone or
+an unrelated repository has appeared at its path, so that push still
+passes I3 and I4 against the real host.
 
 ### 7.5 Error handling and output
 
@@ -451,7 +471,7 @@ declared done.
 | M1 (done 2026-10-31) | Core | `init`, `claim`, `unclaim`, `ls`, `which`, passthrough; manifest and both exclude generators; scenarios 1, 4, 10 |
 | M2 (done 2026-10-31) | Remotes | `clone`, remote normalization, I4; scenarios 3, 5 |
 | M3 (done 2026-10-31) | Guards | `check`, `hook pre-commit`, `hook pre-push`, inlay pre-push, `hooks install\|uninstall\|status`; scenarios 2, 8 |
-| M4 | Worktrees | worktree keys, `attach`, `prune`, union exclude; scenario 6 |
+| M4 (done 2026-10-31) | Worktrees | worktree keys, `attach`, `prune`, union exclude; scenario 6 |
 | M5 | Lifecycle and release | `detach`, `restore`, `status`, `--porcelain`, README, goreleaser config, CI matrix; scenarios 7, 9 |
 
 M0 is done before any Go beyond the runner is written. If a mechanic fails,

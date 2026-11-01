@@ -577,3 +577,176 @@ func TestMissingGlobalExcludesIsSkipped(t *testing.T) {
 		t.Fatalf("inlay ls-files = %q, want %q", got, want)
 	}
 }
+
+// Scenario 6: linked worktrees. attach copies an inlay from the main
+// worktree, the copies commit independently, the host exclude is the union
+// across worktrees, and prune removes inlays once their worktree is gone,
+// keeping any with unpushed commits unless forced.
+func TestWorktreeAttachAndPrune(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+	f.inlayOK(f.root, "init", "local")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "local", "notes")
+	f.inlayOK(f.root, "local", "commit", "-q", "-m", "notes")
+
+	wt := filepath.Join(f.base, "wts", "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	contains(t, f.inlayFails(wt, 1, "attach", "nope"), `no inlay named "nope" is attached to another worktree`, "attach of an unknown inlay")
+	f.inlayFails(wt, 2, "attach")
+	f.inlayFails(wt, 2, "attach", "--all", "claude")
+	contains(t, f.inlayOK(wt, "ls"), "attached in other worktrees: claude, local", "ls hint")
+
+	// An uncommitted change in the main copy is reported, not copied.
+	f.write(".claude/settings.json", "{\"dirty\":true}\n")
+	out, errOut, code := f.inlay(wt, "attach", "claude")
+	if code != 0 {
+		t.Fatalf("attach: exit %d\n%s", code, errOut)
+	}
+	contains(t, out, "attached inlay claude from worktree main (branch main, 1 claims)", "attach output")
+	contains(t, errOut, "has uncommitted changes, which attach does not copy", "attach warning")
+	f.inlayOK(f.root, "claude", "checkout", "-q", "--", ".claude/settings.json")
+	if got := readAt(t, wt, ".claude/settings.json"); got != "{}\n" {
+		t.Fatalf("settings in the worktree = %q", got)
+	}
+	if got := f.git(wt, "status", "--porcelain"); got != "" {
+		t.Fatalf("worktree host status = %q", got)
+	}
+	if got := f.inlayOK(wt, "ls"); got != "claude\t.claude/" {
+		t.Fatalf("ls in the worktree = %q", got)
+	}
+	contains(t, f.inlayFails(wt, 1, "attach", "claude"), "already attached", "second attach")
+	// The copy tracks the real remote, not the sibling, and keeps no
+	// scratch refs.
+	if got := f.inlayOK(wt, "claude", "remote", "get-url", "origin"); got != private {
+		t.Fatalf("origin in the worktree copy = %q, want %q", got, private)
+	}
+	if got := f.inlayOK(wt, "claude", "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/main" {
+		t.Fatalf("upstream in the worktree copy = %q", got)
+	}
+	if got := f.inlayOK(wt, "claude", "for-each-ref", "refs/sibling/"); got != "" {
+		t.Fatalf("scratch refs left behind: %q", got)
+	}
+
+	// Commits are independent and travel through the remote.
+	writeFile(t, filepath.Join(wt, ".claude", "settings.json"), "{\"wt\":1}\n")
+	f.inlayOK(wt, "claude", "commit", "-q", "-a", "-m", "from the worktree")
+	if f.read(".claude/settings.json") != "{}\n" {
+		t.Fatal("a commit in the worktree copy changed the main copy")
+	}
+	f.inlayOK(wt, "claude", "push", "-q")
+	f.inlayOK(f.root, "claude", "pull", "-q")
+	if f.read(".claude/settings.json") != "{\"wt\":1}\n" {
+		t.Fatal("the main copy did not receive the worktree's commit")
+	}
+
+	// A claim made in the worktree is excluded in every worktree.
+	writeFile(t, filepath.Join(wt, "wt-only", "x"), "x\n")
+	f.inlayOK(wt, "claim", "claude", "wt-only")
+	f.inlayOK(wt, "claude", "commit", "-q", "-m", "wt-only")
+	if _, _, code := f.run(f.root, "git", "check-ignore", "-q", "wt-only"); code != 0 {
+		t.Fatal("the main worktree does not ignore a path claimed in a linked worktree")
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check in main with a worktree claim")
+
+	// --all brings over what is left; local has no remote to reuse.
+	out, errOut, code = f.inlay(wt, "attach", "--all")
+	if code != 0 {
+		t.Fatalf("attach --all: exit %d\n%s", code, errOut)
+	}
+	contains(t, out, "attached inlay local from worktree main", "attach --all output")
+	contains(t, errOut, "inlay local has no remote", "attach --all warning")
+	if got := readAt(t, wt, "notes/a.md"); got != "a\n" {
+		t.Fatalf("notes in the worktree = %q", got)
+	}
+	if got := f.inlayOK(wt, "attach", "--all"); got != "no inlays are attached to other worktrees of this host" {
+		t.Fatalf("attach --all with nothing left = %q", got)
+	}
+	if got := f.inlayOK(f.root, "prune"); got != "nothing to prune" {
+		t.Fatalf("prune with every worktree present = %q", got)
+	}
+
+	// A locked worktree whose path is missing, as with an unmounted volume,
+	// is not stale.
+	f.git(f.root, "worktree", "lock", wt)
+	if err := os.RemoveAll(filepath.Join(f.base, "wts")); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.inlayOK(f.root, "prune"); got != "nothing to prune" {
+		t.Fatalf("prune with a locked worktree = %q", got)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check with a locked worktree")
+
+	// Unlocked, with even the parent directory gone, the inlays are stale.
+	// claude has the unpushed wt-only commit and local has no remote at
+	// all, so both are kept until pushed or forced.
+	if err := os.Remove(filepath.Join(f.root, ".git", "worktrees", "wt", "locked")); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, f.inlayFails(f.root, 1, "check"), "worktree wt/wt, which no longer exists", "check with a stale inlay")
+	out = f.inlayOK(f.root, "prune", "--dry-run")
+	contains(t, out, "wt/wt\tclaude\twould keep (1 unpushed commit(s))", "dry run")
+	contains(t, out, "wt/wt\tlocal\twould keep (2 unpushed commit(s))", "dry run")
+	if !f.exists(".git/inlays/wt/wt/claude") {
+		t.Fatal("a dry run removed an inlay")
+	}
+	out, errOut, code = f.inlay(f.root, "prune")
+	if code != 1 {
+		t.Fatalf("prune with unpushed commits: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	contains(t, errOut, "claude: push with: git --git-dir=", "prune advice")
+	contains(t, errOut, filepath.Join(".git", "inlays", "wt", "wt", "claude")+" --work-tree=", "prune advice")
+	contains(t, errOut, " push origin main", "prune advice")
+	contains(t, errOut, "local has no remote; add one with:", "prune advice for an inlay without a remote")
+	if !f.exists(".git/inlays/wt/wt/claude") || !f.exists(".git/inlays/wt/wt/local") {
+		t.Fatal("prune removed an inlay with unpushed commits")
+	}
+
+	// The advised push works with the worktree and its parent gone, and
+	// passes the inlay's own guard.
+	staleClaude := filepath.Join(f.root, ".git", "inlays", "wt", "wt", "claude")
+	common := filepath.Join(f.root, ".git")
+	stale := func(args ...string) string {
+		t.Helper()
+		return f.git(f.base, append([]string{"--git-dir=" + staleClaude, "--work-tree=" + common}, args...)...)
+	}
+	stale("push", "-q", "origin", "main")
+
+	// It also passes when an unrelated repository, with a remote at the
+	// inlay's own URL, has since appeared at the old path: the guard
+	// answers from the inlay's real host, not from whatever sits there now.
+	tree := stale("rev-parse", "HEAD^{tree}")
+	commit := stale("commit-tree", tree, "-p", "HEAD", "-m", "after the worktree went")
+	stale("update-ref", "refs/heads/main", commit)
+	f.git(f.base, "clone", "-q", f.remote, wt)
+	f.git(wt, "remote", "add", "mirror", private)
+	stale("push", "-q", "origin", "main")
+	if err := os.RemoveAll(filepath.Join(f.base, "wts")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The pushed inlay goes; the other stays until forced.
+	out, errOut, code = f.inlay(f.root, "prune")
+	if code != 1 {
+		t.Fatalf("prune with one unpushed inlay: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	contains(t, out, "wt/wt\tclaude\tremoved", "prune after the push")
+	contains(t, out, "wt/wt\tlocal\tkept (2 unpushed commit(s))", "prune after the push")
+	if f.exists(".git/inlays/wt/wt/claude") {
+		t.Fatal("the pushed inlay was not removed")
+	}
+	contains(t, f.inlayOK(f.root, "prune", "--force"), "wt/wt\tlocal\tremoved (2 unpushed commit(s))", "forced prune")
+	if f.exists(".git/inlays/wt") {
+		t.Fatal("an empty worktree directory was left behind")
+	}
+	// With the worktree's claim gone, so is its exclude entry.
+	if _, _, code := f.run(f.root, "git", "check-ignore", "-q", "wt-only"); code == 0 {
+		t.Fatal("the main worktree still ignores the pruned worktree's claim")
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 2 claim(s)", "check after prune")
+}

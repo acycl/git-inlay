@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/acycl/git-inlay/internal/hooks"
 	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
+	"github.com/acycl/git-inlay/internal/manifest"
 	"github.com/acycl/git-inlay/internal/remote"
 )
 
@@ -158,7 +160,10 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Join(c.o.Dir, gitDir)
 	}
-	r := gitx.Runner{GitDir: gitDir, Dir: c.o.Dir, Env: c.o.Env}
+	// Any existing directory serves as the work tree for reading config;
+	// without one git would resolve core.worktree and refuse to start if
+	// its parent directory is gone.
+	r := gitx.Runner{GitDir: gitDir, WorkTree: c.o.Dir, Dir: c.o.Dir, Env: c.o.Env}
 	name, ok, err := r.Config("inlay.name")
 	if err != nil {
 		return err
@@ -173,9 +178,24 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	if !filepath.IsAbs(worktree) {
 		worktree = filepath.Join(gitDir, worktree)
 	}
+	common, hasHost, _ := r.Config("inlay.host")
 	h, err := host.Discover(worktree, c.o.Env)
+	if err == nil && hasHost && !sameDir(common, h.CommonDir) {
+		// Another repository now sits where the worktree was; its remotes
+		// and tree say nothing about this inlay.
+		err = fmt.Errorf("the repository at %s is not the host of inlay %s", worktree, name)
+	}
 	if err != nil {
-		return err
+		// A removed linked worktree leaves its inlay behind. The host's
+		// config and the inlay's own history still allow both checks, so
+		// the push that prune advises for such an inlay can go through.
+		if !hasHost {
+			return err
+		}
+		if _, statErr := os.Stat(common); statErr != nil {
+			return err
+		}
+		h = host.Detached(common, c.o.Env)
 	}
 	in := &inlay.Inlay{Name: name, Key: h.Key, GitDir: gitDir, Host: h}
 
@@ -197,7 +217,14 @@ func (c *cli) hookInlayPrePush(args []string) error {
 		}
 	}
 
-	m, err := in.ReadManifest()
+	var m *manifest.Manifest
+	if h.Root == "" {
+		// No tree to read the manifest from; the committed one is the
+		// only one there is.
+		m, err = inlay.ManifestAt(in.Git(), name, "HEAD")
+	} else {
+		m, err = in.ReadManifest()
+	}
 	if err != nil {
 		return err
 	}
@@ -225,6 +252,17 @@ func (c *cli) hookInlayPrePush(args []string) error {
 		}
 	}
 	return c.refuse("push inlay "+name, vs)
+}
+
+// sameDir reports whether two paths name the same directory, allowing for
+// symlinks such as macOS's /var.
+func sameDir(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 // refuse prints violations and returns the violation exit status.

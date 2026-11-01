@@ -52,9 +52,20 @@ func Discover(dir string, env []string) (*Host, error) {
 	return h, nil
 }
 
-// Git returns a runner for the host, running at its root.
+// Detached returns a host for an inlay whose worktree no longer exists. It
+// answers from the common dir alone: config and remotes work, anything
+// that needs the tree does not, and Root is empty.
+func Detached(commonDir string, env []string) *Host {
+	return &Host{GitDir: commonDir, CommonDir: commonDir, Env: env}
+}
+
+// Git returns a runner for the host, running at its root, or pinned to the
+// common dir when the host is detached.
 func (h *Host) Git() gitx.Runner {
 	r := gitx.Runner{Dir: h.Root, Env: h.Env}
+	if h.Root == "" {
+		r = gitx.Runner{GitDir: h.CommonDir, Dir: h.CommonDir, Env: h.Env}
+	}
 	if h.IndexFile != "" {
 		r.ExtraEnv = []string{"GIT_INDEX_FILE=" + h.IndexFile}
 	}
