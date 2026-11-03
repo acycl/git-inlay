@@ -126,3 +126,7 @@ Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,
 `PLAN.md` holds the full design: the on-disk model, the exclude
 generation, the invariants, the guards, and a comparison with git-dupe,
 sich, overgit, vcsh, and git-sidecar.
+
+## License
+
+Apache-2.0; see `LICENSE`.
