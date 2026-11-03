@@ -74,3 +74,25 @@ jobs:
         run: echo "$HOME/git-$GIT_VERSION/bin" >> "$GITHUB_PATH"
       - run: git --version
       - run: go test -race -count=1 ./...
+
+  snapshot:
+    name: goreleaser snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build the release artifacts without publishing
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+      - name: check an archive carries the binary and the license
+        run: |
+          tar -tzf dist/git-inlay_*_linux_amd64.tar.gz | tee "$RUNNER_TEMP/contents.txt"
+          grep -qx git-inlay "$RUNNER_TEMP/contents.txt"
+          grep -qx LICENSE "$RUNNER_TEMP/contents.txt"

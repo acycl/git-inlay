@@ -474,7 +474,10 @@ has the `claude` binary. Nothing has yet run on Windows; the first CI run
 is the first test of the hook shims and drive-letter paths there.
 Releases (`.github/workflows/release.yml`, `.goreleaser.yaml`) build
 linux, darwin and windows binaries for amd64 and arm64 on a `v*` tag and
-open a draft release.
+open a draft release. A snapshot job in the CI workflow runs the same
+goreleaser build without publishing on every push, so a broken release
+config fails there rather than at tag time, and checks that the
+archives carry `LICENSE` (Apache-2.0, added 2026-11-03).
 
 Verification subagents per the project conventions: `go-test-runner` and
 `go-vet-runner` after each change; `code-reviewer` before each milestone is
