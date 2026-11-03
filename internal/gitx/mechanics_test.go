@@ -79,12 +79,14 @@ func TestCommonDirExcludeAppliesInLinkedWorktree(t *testing.T) {
 		t.Fatal("linked worktree does not ignore a path excluded in the common dir")
 	}
 
+	// Git prints forward slashes on every platform, so convert its output to
+	// native separators before comparing with filepath-built paths.
 	hostGit := realPath(t, filepath.Join(h.root, ".git"))
-	if got := wt.git(t, "rev-parse", "--path-format=absolute", "--git-common-dir"); got != hostGit {
+	if got := filepath.FromSlash(wt.git(t, "rev-parse", "--path-format=absolute", "--git-common-dir")); got != hostGit {
 		t.Fatalf("common dir from linked worktree = %q, want %q", got, hostGit)
 	}
 	wantGitDir := filepath.Join(hostGit, "worktrees", "wt")
-	if got := wt.git(t, "rev-parse", "--path-format=absolute", "--git-dir"); got != wantGitDir {
+	if got := filepath.FromSlash(wt.git(t, "rev-parse", "--path-format=absolute", "--git-dir")); got != wantGitDir {
 		t.Fatalf("git dir from linked worktree = %q, want %q", got, wantGitDir)
 	}
 }
