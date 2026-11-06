@@ -40,6 +40,12 @@ func TestMain(m *testing.M) {
 	}
 	args := []string{"build", "-o", bin}
 	if coverDir = os.Getenv("GOCOVERDIR"); coverDir != "" {
+		// Each run's cwd is inside a fixture, where a relative path would
+		// name nothing.
+		if coverDir, err = filepath.Abs(coverDir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		args = append(args, "-cover", "-coverpkg=github.com/acycl/git-inlay/...")
 	}
 	build := exec.Command("go", append(args, "../../cmd/git-inlay")...)
@@ -1556,4 +1562,158 @@ func TestHookShimFallsBackToInstallingBinary(t *testing.T) {
 		t.Fatal("a commit passed with git-inlay nowhere to be found")
 	}
 	contains(t, errOut, "binary not on PATH or at /nonexistent/git-inlay; refusing", "fail-closed message")
+}
+
+// Attaching an inlay whose linked worktree was deleted from disk, not
+// through git worktree remove, recovers its files and history into this
+// worktree. The orphan stays stale for check, and prune keeps it for its
+// commits on no remote until forced.
+func TestAttachFromVanishedWorktree(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	wt := filepath.Join(f.base, "wts", "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	f.inlayOK(wt, "init", "notes")
+	writeFile(t, filepath.Join(wt, "notes", "a.md"), "a\n")
+	f.inlayOK(wt, "claim", "notes", "notes")
+	f.inlayOK(wt, "notes", "commit", "-q", "-m", "first note")
+	writeFile(t, filepath.Join(wt, "notes", "b.md"), "b\n")
+	f.inlayOK(wt, "notes", "add", "notes/b.md")
+	f.inlayOK(wt, "notes", "commit", "-q", "-m", "second note")
+	history := f.inlayOK(wt, "notes", "log", "--format=%H %s")
+
+	// Deleted by hand with its parent, so git still keeps the worktree's
+	// administrative directory, whose gitdir file now names nothing, and
+	// the inlay's core.worktree names a path git cannot even start in.
+	if err := os.RemoveAll(filepath.Dir(wt)); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, f.inlayFails(f.root, 1, "check"), "worktree wt/wt, which no longer exists", "check after the worktree is deleted")
+	if f.exists("notes") {
+		t.Fatal("the main worktree has the inlay's files before attach")
+	}
+
+	out, errOut, code := f.inlay(f.root, "attach", "notes")
+	if code != 0 {
+		t.Fatalf("attach from a vanished worktree: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	contains(t, out, "attached inlay notes from worktree wt/wt (branch main, 1 claims)", "attach output")
+	contains(t, errOut, "inlay notes has no remote", "attach warning")
+	if strings.Contains(errOut, "uncommitted changes") {
+		t.Fatalf("attach reported uncommitted changes in a worktree that is gone:\n%s", errOut)
+	}
+	if f.read("notes/a.md") != "a\n" || f.read("notes/b.md") != "b\n" {
+		t.Fatal("attach did not restore the inlay's files")
+	}
+	if got := f.inlayOK(f.root, "notes", "log", "--format=%H %s"); got != history {
+		t.Fatalf("history after attach = %q, want %q", got, history)
+	}
+	if got := f.inlayOK(f.root, "notes", "status", "--porcelain"); got != "" {
+		t.Fatalf("inlay status after attach = %q", got)
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after attach = %q", got)
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "notes\tnotes/" {
+		t.Fatalf("ls after attach = %q", got)
+	}
+
+	// The orphan's claims still bind every worktree until it is pruned,
+	// and its commits are on no remote, so prune keeps it although this
+	// worktree's copy now holds them.
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayFails(f.root, 1, "check"), "worktree wt/wt, which no longer exists", "check after attach")
+	out, errOut, code = f.inlay(f.root, "prune")
+	if code != 1 {
+		t.Fatalf("prune of the orphan: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	contains(t, out, "wt/wt\tnotes\tkept (3 unpushed commit(s))", "prune of the orphan")
+	contains(t, errOut, "notes has no remote; add one with:", "prune advice")
+	contains(t, f.inlayOK(f.root, "prune", "--force"), "wt/wt\tnotes\tremoved (3 unpushed commit(s))", "forced prune")
+	if f.exists(".git/inlays/wt") {
+		t.Fatal("prune left the orphan's directory behind")
+	}
+	if _, _, code := f.run(f.root, "git", "check-ignore", "-q", "notes/a.md"); code != 0 {
+		t.Fatal("the host stopped ignoring the recovered claim after prune")
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check after prune")
+}
+
+// Pushing a branch deletion passes the host pre-push guard, which skips an
+// update whose local object id is zero, even when the branch it deletes
+// carries a leaked claimed path: deleting it is the fix.
+func TestPushBranchDeletion(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "hooks", "install")
+
+	// The leak goes on a branch of its own; a mixed reset leaves main and
+	// the file in the tree as they were.
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	f.git(f.root, "branch", "leaky")
+	f.git(f.root, "reset", "-q", "HEAD~1")
+	contains(t, f.gitFails(f.root, "push", "-q", "origin", "leaky"), ".claude/settings.json: belongs to inlay claude", "pre-push of the leaky branch")
+	f.git(f.root, "push", "-q", "--no-verify", "origin", "leaky")
+	if got := f.git(f.root, "ls-remote", "--heads", "origin", "leaky"); got == "" {
+		t.Fatal("the leaky branch did not reach the remote")
+	}
+
+	f.git(f.root, "push", "-q", "origin", ":leaky")
+	if got := f.git(f.root, "ls-remote", "--heads", "origin", "leaky"); got != "" {
+		t.Fatalf("the remote still has the deleted branch: %q", got)
+	}
+	if f.read(".claude/settings.json") != "{}\n" {
+		t.Fatal("the inlay's file changed")
+	}
+}
+
+// A claim whose name needs escaping in gitignore syntax, with '#', '!', a
+// space and '[', is excluded in the host and included in the inlay as the
+// literal path, not as a pattern matching a sibling.
+func TestClaimNeedsEscaping(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	const dir = "a#b !c [d]"
+	if err := os.MkdirAll(filepath.Join(f.root, dir), 0o755); err != nil {
+		t.Skipf("the filesystem refuses %q: %v", dir, err)
+	}
+	f.write(dir+"/x.md", "x\n")
+	f.inlayOK(f.root, "init", "odd")
+	f.inlayOK(f.root, "claim", "odd", dir)
+	f.inlayOK(f.root, "odd", "commit", "-q", "-m", "odd")
+
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status = %q, want clean", got)
+	}
+	if _, errOut, code := f.run(f.root, "git", "check-ignore", "-q", dir+"/x.md"); code != 0 {
+		t.Fatalf("the host does not ignore %s/x.md: exit %d\n%s", dir, code, errOut)
+	}
+	if got, want := f.inlayOK(f.root, "odd", "ls-files", "-z"), ".git-inlay/odd.paths\x00"+dir+"/x.md\x00"; got != want {
+		t.Fatalf("inlay ls-files = %q, want %q", got, want)
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "odd\t"+dir+"/" {
+		t.Fatalf("ls = %q", got)
+	}
+
+	// Unescaped, "[d]" would be a class matching "d", so this sibling
+	// would be ignored by the host and tracked by the inlay.
+	const sibling = "a#b !c d"
+	f.write(sibling+"/y.md", "y\n")
+	if _, _, code := f.run(f.root, "git", "check-ignore", "-q", sibling+"/y.md"); code != 1 {
+		t.Fatalf("check-ignore of %s/y.md: exit %d, want 1 (not ignored)", sibling, code)
+	}
+	if got := f.inlayOK(f.root, "odd", "status", "--porcelain"); got != "" {
+		t.Fatalf("inlay status with the sibling present = %q, want clean", got)
+	}
+	if err := os.RemoveAll(filepath.Join(f.root, sibling)); err != nil {
+		t.Fatal(err)
+	}
+
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check")
 }
