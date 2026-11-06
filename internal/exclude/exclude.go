@@ -23,15 +23,17 @@ const (
 	HostEnd   = "# <<< git-inlay managed block <<<"
 )
 
-// Escape makes a path safe as a literal gitignore pattern.
+// Escape makes a path safe as a literal gitignore pattern. It works on
+// bytes, not runes: every character it escapes is ASCII, and a name that
+// is not valid UTF-8, legal on Linux, must reach git unchanged.
 func Escape(p string) string {
 	var b strings.Builder
-	for _, r := range p {
-		switch r {
+	for i := range len(p) {
+		switch p[i] {
 		case '#', '!', '*', '?', '[', '\\':
 			b.WriteByte('\\')
 		}
-		b.WriteRune(r)
+		b.WriteByte(p[i])
 	}
 	s := b.String()
 	if trimmed := strings.TrimRight(s, " "); len(trimmed) != len(s) {

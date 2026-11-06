@@ -239,9 +239,21 @@ func ascii(s string) bool {
 // paths on a host with core.ignoreCase. It folds every letter, round trip
 // through upper case included, so final sigma, long s and dotless i meet
 // their plain forms: a superset of what APFS and NTFS fold, so that a
-// guard errs towards refusing.
+// guard errs towards refusing. A byte that is not valid UTF-8 passes
+// through as itself, so two different Latin-1 names keep different keys.
 func Fold(p string) string {
-	return strings.Map(func(r rune) rune { return unicode.ToLower(unicode.ToUpper(r)) }, p)
+	var b strings.Builder
+	b.Grow(len(p))
+	for i := 0; i < len(p); {
+		r, size := utf8.DecodeRuneInString(p[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteByte(p[i])
+		} else {
+			b.WriteRune(unicode.ToLower(unicode.ToUpper(r)))
+		}
+		i += size
+	}
+	return b.String()
 }
 
 // IgnoreCase reports core.ignoreCase, which git sets at init on a

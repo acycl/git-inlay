@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/guard"
@@ -32,7 +33,9 @@ func canonicalCase(root, rel string) string {
 				found = part
 				break
 			}
-			if strings.EqualFold(e.Name(), part) {
+			// EqualFold reads every invalid UTF-8 byte as U+FFFD, so it
+			// would match two different Latin-1 names; those need bytes.
+			if utf8.ValidString(part) && utf8.ValidString(e.Name()) && strings.EqualFold(e.Name(), part) {
 				found = e.Name()
 			}
 		}
