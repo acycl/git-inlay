@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidatePath(t *testing.T) {
-	bad := []string{"", "/abs", "a//b", "a/./b", "../x", "a/..", "#x", " a", "a ", "a /b", "a\\b", ".git/x", ".git-inlay/x.paths", "a\nb", "a\rb"}
+	bad := []string{"", "/abs", "a//b", "a/./b", "../x", "a/..", "#x", " a", "a ", "a /b", "a\\b", ".git/x", ".GIT/x", ".git-inlay/x.paths", ".Git-Inlay/x", "a\nb", "a\rb"}
 	for _, p := range bad {
 		if err := ValidatePath(p); err == nil {
 			t.Errorf("ValidatePath(%q) = nil, want error", p)

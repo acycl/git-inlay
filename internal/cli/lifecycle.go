@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
 )
@@ -144,8 +145,24 @@ func (c *cli) detach(args []string) error {
 			return err
 		}
 		defer root.Close()
+		// On a case-insensitive host the host's spelling of a shared
+		// file may differ from the inlay's; it is the same file.
+		icase, err := s.host.IgnoreCase()
+		if err != nil {
+			return err
+		}
+		key := func(p string) string {
+			if icase {
+				return host.Fold(p)
+			}
+			return p
+		}
+		hostOwned := map[string]bool{}
+		for _, p := range shared {
+			hostOwned[key(p)] = true
+		}
 		for _, p := range files {
-			if slices.Contains(shared, p) {
+			if hostOwned[key(p)] {
 				continue
 			}
 			err := root.Remove(filepath.FromSlash(p))

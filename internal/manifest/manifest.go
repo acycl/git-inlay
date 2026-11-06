@@ -111,10 +111,12 @@ func ValidatePath(p string) error {
 			return errors.New("has a segment ending in a space")
 		}
 	}
-	switch segs[0] {
-	case ".git":
+	// Any case, since a case-insensitive filesystem reaches the same
+	// directory through each.
+	switch {
+	case strings.EqualFold(segs[0], ".git"):
 		return errors.New("is inside .git")
-	case Dir:
+	case strings.EqualFold(segs[0], Dir):
 		return fmt.Errorf("is inside %s, which is reserved", Dir)
 	}
 	return nil

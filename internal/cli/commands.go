@@ -297,7 +297,7 @@ func (c *cli) check(args []string) error {
 			return err
 		}
 	} else {
-		vs = append(vs, guard.Overlaps(s.entries)...)
+		vs = append(vs, s.index.Overlaps(s.entries)...)
 		hv, err := guard.HostTracked(s.host, s.index)
 		if err != nil {
 			return err

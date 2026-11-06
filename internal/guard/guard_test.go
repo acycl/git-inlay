@@ -24,7 +24,7 @@ func entry(t *testing.T, name string, paths ...string) inlay.Entry {
 }
 
 func TestIndexOwner(t *testing.T) {
-	x := NewIndex([]inlay.Entry{entry(t, "team", ".claude/"), entry(t, "me", "notes/research.md")})
+	x := NewIndex([]inlay.Entry{entry(t, "team", ".claude/"), entry(t, "me", "notes/research.md")}, false)
 	cases := map[string]string{
 		".claude/settings.json":  "team",
 		".git-inlay/team.paths":  "team",
@@ -32,6 +32,8 @@ func TestIndexOwner(t *testing.T) {
 		"notes/research.md":      "me",
 		"notes/other.md":         "",
 		".git-inlay/other.paths": "",
+		".Claude/settings.json":  "",
+		"Notes/Research.md":      "",
 	}
 	for p, want := range cases {
 		o, ok := x.Owner(p)
@@ -44,11 +46,60 @@ func TestIndexOwner(t *testing.T) {
 	}
 }
 
+// On a case-insensitive host every case variant of a claimed path, and of
+// the reserved manifest directory, is the claim's, and the owner reports
+// the claim as the manifest spells it.
+func TestIndexOwnerFolded(t *testing.T) {
+	x := NewIndex([]inlay.Entry{entry(t, "team", ".claude/"), entry(t, "me", "Notes/Research.md")}, true)
+	cases := map[string]string{
+		".Claude/settings.json": "team",
+		".CLAUDE/a/b":           "team",
+		".claude/settings.json": "team",
+		"notes/research.md":     "me",
+		"NOTES/RESEARCH.MD":     "me",
+		".Git-Inlay/team.paths": "team",
+		"notes/research.md.bak": "",
+		".claudex/a":            "",
+	}
+	for p, want := range cases {
+		o, ok := x.Owner(p)
+		if got := o.Inlay; got != want || ok != (want != "") {
+			t.Errorf("Owner(%q) = %q, %v; want %q", p, got, ok, want)
+		}
+	}
+	if o, _ := x.Owner("notes/research.md"); o.Claim.Path != "Notes/Research.md" {
+		t.Errorf("Owner reports claim %q, want the manifest's spelling", o.Claim)
+	}
+	if v, ok := claimed(x, ".GIT-INLAY/other.paths"); !ok || !strings.Contains(v.Reason, "reserved") {
+		t.Errorf("claimed(.GIT-INLAY/other.paths) = %v, %v; want the reserved directory", v, ok)
+	}
+	if !x.Owns(manifest.Claim{Path: "Docs", Dir: true}, "docs/notes.md") {
+		t.Error("Owns does not fold case")
+	}
+
+	// Letters beyond ASCII fold too, including those whose lower case
+	// has two forms.
+	g := NewIndex([]inlay.Entry{entry(t, "g", "λόγος/"), entry(t, "s", "ſtore/"), entry(t, "c", "Café/")}, true)
+	for p, want := range map[string]string{"ΛΌΓΟΣ/x": "g", "λόγοσ/x": "g", "STORE/x": "s", "CAFÉ/x": "c"} {
+		if o, ok := g.Owner(p); !ok || o.Inlay != want {
+			t.Errorf("Owner(%q) = %q, %v; want %q", p, o.Inlay, ok, want)
+		}
+	}
+}
+
 func TestOverlaps(t *testing.T) {
 	entries := []inlay.Entry{entry(t, "a", "docs/"), entry(t, "b", "docs/research/"), entry(t, "c", "src/")}
-	vs := Overlaps(entries)
+	vs := NewIndex(entries, false).Overlaps(entries)
 	if len(vs) != 1 || vs[0].Inlay != "a" || !strings.Contains(vs[0].Reason, "inlay b") {
 		t.Fatalf("Overlaps = %v", vs)
+	}
+	// Claims that differ only in case overlap on a case-insensitive host.
+	entries = []inlay.Entry{entry(t, "a", "Docs/"), entry(t, "b", "docs/notes.md")}
+	if vs := NewIndex(entries, false).Overlaps(entries); len(vs) != 0 {
+		t.Fatalf("exact Overlaps = %v", vs)
+	}
+	if vs := NewIndex(entries, true).Overlaps(entries); len(vs) != 1 {
+		t.Fatalf("folded Overlaps = %v", vs)
 	}
 }
 

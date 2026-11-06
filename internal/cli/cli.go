@@ -255,8 +255,12 @@ func (s *session) reload() error {
 	if err != nil {
 		return err
 	}
+	icase, err := s.host.IgnoreCase()
+	if err != nil {
+		return err
+	}
 	s.entries = entries
-	s.index = guard.NewIndex(entries)
+	s.index = guard.NewIndex(entries, icase)
 	return nil
 }
 
@@ -368,7 +372,7 @@ func (s *session) vet(name string, cl manifest.Claim) error {
 			continue
 		}
 		for _, other := range e.Manifest.Claims {
-			if cl.Owns(other.Path) {
+			if s.index.Owns(cl, other.Path) {
 				return fmt.Errorf("%s would contain %s, which inlay %s claims", cl, other, e.Name)
 			}
 		}

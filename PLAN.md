@@ -120,6 +120,23 @@ Claim validation, applied by `claim` and when reading a manifest:
 - a claim under another claim of the same inlay is dropped as redundant,
   with a warning
 
+On a host with `core.ignoreCase` set, `claim` spells a path as the disk
+does, and the host guards (pre-commit, pre-push, `check`, `which`) and
+both overlap checks of I1 (claim time and `check`) match paths against
+claims with case folded, so a case-only rename on disk does not carry a
+claimed file past them. They fold every letter, as APFS and NTFS do;
+git's `icase` pathspec folds ASCII only, so when a claim has a letter
+beyond ASCII the host-tracked check lists every tracked file and folds
+them itself. One gap is left by choice: four letters beyond ASCII fold
+onto ASCII ones (the Kelvin sign, dotless and dotted i, long s), so a
+host-tracked `Kit/` spelled with the Kelvin sign escapes `check` for the
+all-ASCII claim `kit/`. Pre-commit and pre-push still refuse it, so it
+takes a `--no-verify` to get there, and closing it would mean listing
+the whole index on every `check`. Case variants of `.git` and
+`.git-inlay` are refused as claims. The inlay's own containment check (I3) stays
+exact: it judges commits that a clone on a case-sensitive filesystem will
+check out, where `.Claude/x` is not under the claim `.claude/`.
+
 ### 4.4 Generated exclude files
 
 **Host managed block** in `$C/info/exclude`, regenerated at the start of every
@@ -576,11 +593,11 @@ ground without a dependency.
 
 ## 10. Risks and open questions
 
-- **Case-insensitive filesystems.** Git sets `core.ignoreCase` at init by
-  probing the directory. The inlay is initialized under `$C`, normally on
-  the same filesystem as the tree. Verify that exclude matching honours it for
-  both repositories; git-dupe emits every ASCII case variant, which suggests
-  it found a gap.
+- **Case-insensitive filesystems.** Resolved: git sets `core.ignoreCase` at
+  init by probing the directory, and under it the managed block's
+  patterns ignore every case variant of a claim. The host guards fold case
+  to match (section 4.3), and `TestClaimCaseInsensitive` covers a
+  case-only rename on disk followed by a forced add.
 - **Windows.** Hook shims need the `sh` that Git for Windows ships.
   `core.worktree` with a drive letter and forward slashes must be tested.
   Symlinks are not involved, which helps.

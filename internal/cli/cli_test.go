@@ -684,6 +684,38 @@ func TestClaimCaseInsensitive(t *testing.T) {
 	f.git(f.root, "commit", "-q", "-m", "docs")
 	f.inlayOK(f.root, "init", "me")
 	contains(t, f.inlayFails(f.root, 1, "claim", "me", "Docs"), "tracked by the host", "claim with the wrong case")
+
+	// Git folds case here, so a path that reaches the guards in another
+	// case than the claim is still the claim's: a case-only rename on disk
+	// must not let a forced add through.
+	f.inlayOK(f.root, "hooks", "install")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "me", ".claude")
+	for _, step := range [][2]string{{".claude", ".claude-tmp"}, {".claude-tmp", ".Claude"}} {
+		if err := os.Rename(filepath.Join(f.root, step[0]), filepath.Join(f.root, step[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.git(f.root, "add", "-f", ".Claude/settings.json")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak"), ".Claude/settings.json: belongs to inlay me", "pre-commit with the wrong case")
+	contains(t, f.inlayFails(f.root, 1, "check", "--staged"), ".Claude/settings.json: belongs to inlay me", "check --staged with the wrong case")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	contains(t, f.inlayFails(f.root, 1, "check"), ".Claude/settings.json: tracked by the host but claimed by inlay me", "check with the wrong case")
+	if got := f.inlayOK(f.root, "which", ".CLAUDE/settings.json"); got != ".CLAUDE/settings.json\tme" {
+		t.Fatalf("which with the wrong case = %q", got)
+	}
+
+	// Git's icase pathspec folds ASCII only; check folds every letter.
+	f.write("Café/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "me", "Café")
+	for _, step := range [][2]string{{"Café", "cafe-tmp"}, {"cafe-tmp", "CAFÉ"}} {
+		if err := os.Rename(filepath.Join(f.root, step[0]), filepath.Join(f.root, step[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.git(f.root, "add", "-f", "CAFÉ/a.md")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	contains(t, f.inlayFails(f.root, 1, "check"), "CAFÉ/a.md: tracked by the host but claimed by inlay me", "check with a non-ASCII case variant")
 }
 
 // A host .gitignore that ignores dotfiles but re-includes a path cannot be
