@@ -40,11 +40,16 @@ func (c *cli) attach(args []string) error {
 			return nil
 		}
 	}
-	for _, name := range names {
+	for i, name := range names {
 		if err := s.attachOne(name); err != nil {
+			// The inlays attached before this one stay attached.
+			if i > 0 {
+				s.warnUnexcluded()
+			}
 			return err
 		}
 	}
+	s.warnUnexcluded()
 	return nil
 }
 

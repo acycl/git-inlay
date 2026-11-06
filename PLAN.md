@@ -220,9 +220,17 @@ command line are relative to the current directory and are normalized against
 | `git inlay version` | print version and the git version in use |
 
 Every command except `version` and the `hook` family begins with a sync step:
-read the manifests of all attached inlays, regenerate the host managed block
-and this worktree's inlay excludes, and verify I1 and I2. The hook family
-reads manifests but does not write.
+read the manifests of all attached inlays and regenerate the host managed
+block and this worktree's inlay excludes, without starting a git process
+beyond host discovery, a manifest read from HEAD where the file is
+missing (below), and the repair of a moved checkout. The claim verbs
+(`init`, for the manifest's own claim, `claim`, `unclaim`, `clone`,
+`attach`, `detach`) then verify I2
+with one `git check-ignore` and warn on a claim the host does not ignore;
+`check` reports the same as a violation, and is the only place a manifest
+changed through passthrough, such as by a pull, is checked. The hook
+family reads manifests
+but does not write.
 
 For inlays attached in other worktrees, the manifest is read from that
 worktree's tree, as for the current one, so a claim staged there but not
@@ -238,7 +246,16 @@ failing; a broken file is that worktree's own commands to report, not a
 reason to stop this one's. Only an absence makes a worktree gone: a
 permission refused or a volume not ready leaves it standing. The sync
 step also repairs an inlay whose config no longer names this host, which
-is what a moved checkout leaves behind.
+is what a moved checkout leaves behind, and tells without a process:
+`Configure` leaves a stamp, `git-inlay-config` in the inlay git dir, of
+the settings it wrote, and the sync step rewrites them only when the stamp
+does not match this host or the inlay's push guard is not the current
+shim. A change to the config that `Configure` did not make, by hand,
+through an include, or by an older git-inlay, leaves the stamp alone, so
+ordinary commands do not see it; `check` compares the config itself and
+reports it, and `hooks install` rewrites it. The case-folded index of section 4.3
+is built only by the verbs that match paths against claims, the only
+ones that need `core.ignoreCase`.
 
 ## 6. Invariants and guards
 

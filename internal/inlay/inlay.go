@@ -98,9 +98,9 @@ func (i *Inlay) config() [][2]string {
 
 func (i *Inlay) hooksDir() string { return filepath.Join(i.GitDir, "hooks") }
 
-// Configure writes the inlay's config and its pre-push guard. Every
-// command repeats it when Configured says no, which is how a moved
-// checkout gets its absolute paths back.
+// Configure writes the inlay's config and its pre-push guard, then the
+// stamp that records them. Every command repeats it when Stamped says no,
+// which is how a moved checkout gets its absolute paths back.
 func (i *Inlay) Configure() error {
 	run := i.Git()
 	for _, kv := range i.config() {
@@ -111,7 +111,39 @@ func (i *Inlay) Configure() error {
 	if err := os.MkdirAll(i.hooksDir(), 0o755); err != nil {
 		return err
 	}
-	return atomicfile.WriteFile(filepath.Join(i.hooksDir(), "pre-push"), []byte(hooks.Shim("inlay-pre-push")), 0o755)
+	if err := atomicfile.WriteFile(filepath.Join(i.hooksDir(), "pre-push"), []byte(hooks.Shim("inlay-pre-push")), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(i.stampFile(), i.stamp(), 0o644)
+}
+
+// stampFile is where Configure records, inside the inlay git dir, the
+// config it wrote.
+func (i *Inlay) stampFile() string { return filepath.Join(i.GitDir, "git-inlay-config") }
+
+// stamp returns the record Configure leaves for the config this host
+// needs: one key=value line per setting.
+func (i *Inlay) stamp() []byte {
+	var b bytes.Buffer
+	for _, kv := range i.config() {
+		fmt.Fprintf(&b, "%s=%s\n", kv[0], kv[1])
+	}
+	return b.Bytes()
+}
+
+// Stamped reports, without running git, whether Configure has run for the
+// host as it stands: its stamp matches the config this host needs and the
+// push guard is the current shim. A moved checkout or an upgrade of
+// git-inlay fails it; a change to the config that Configure did not make,
+// by hand, through an include or by an older git-inlay, does not, which
+// Configured, at the cost of a process, does see.
+func (i *Inlay) Stamped() bool {
+	got, err := os.ReadFile(i.stampFile())
+	if err != nil || !bytes.Equal(got, i.stamp()) {
+		return false
+	}
+	shim, err := os.ReadFile(filepath.Join(i.hooksDir(), "pre-push"))
+	return err == nil && string(shim) == hooks.Shim("inlay-pre-push")
 }
 
 // Configured reports whether the inlay's config still names this host and

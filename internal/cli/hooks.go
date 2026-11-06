@@ -103,7 +103,11 @@ func (c *cli) hookPreCommit() error {
 	// Git may be committing from a temporary index (commit -a, commit <path>);
 	// inspect that one rather than .git/index.
 	s.host.IndexFile = c.env("GIT_INDEX_FILE")
-	vs, err := guard.Staged(s.host, s.index)
+	x, err := s.guards()
+	if err != nil {
+		return err
+	}
+	vs, err := guard.Staged(s.host, x)
 	if err != nil {
 		return err
 	}
@@ -134,7 +138,11 @@ func (c *cli) hookPrePush(args []string) error {
 	if err != nil {
 		return err
 	}
-	vs, err := guard.Outgoing(s.host, s.index, updates, remoteName)
+	x, err := s.guards()
+	if err != nil {
+		return err
+	}
+	vs, err := guard.Outgoing(s.host, x, updates, remoteName)
 	if err != nil {
 		return err
 	}

@@ -180,6 +180,7 @@ func (c *cli) detach(args []string) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	s.warnUnexcluded()
 	if *keep {
 		c.printf("detached inlay %s; %d file(s) kept\n", name, len(files))
 		c.warnf("the files stay on disk and are now visible to the host as untracked")

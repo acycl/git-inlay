@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/gitx"
+	"github.com/acycl/git-inlay/internal/guard"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
 	"github.com/acycl/git-inlay/internal/remote"
@@ -161,7 +162,7 @@ func ignoreRules(run gitx.Runner, paths []string) map[string]ignoreRule {
 // unexcluded returns the claims the host does not ignore even with the
 // managed block in place, which a .gitignore negation causes.
 func (s *session) unexcluded() ([]manifest.Claim, error) {
-	claims := s.index.Claims()
+	claims := guard.Union(s.entries)
 	if len(claims) == 0 {
 		return nil, nil
 	}

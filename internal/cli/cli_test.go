@@ -1362,6 +1362,15 @@ func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {
 	f.inlayOK(moved, "claude", "push", "-q", "origin", "main")
 	f.inlayOK(moved, "hooks", "install")
 	contains(t, f.inlayOK(moved, "check"), "ok: 1 inlay(s)", "check after the move")
+
+	// The sync step trusts the stamp Configure leaves, so a hand edit of
+	// the config survives an ordinary command; check reports it and
+	// hooks install puts it back.
+	f.git(moved, "--git-dir="+gitDir, "--work-tree="+moved, "config", "core.hooksPath", filepath.Join(f.base, "elsewhere"))
+	f.inlayOK(moved, "ls")
+	contains(t, f.inlayFails(moved, 1, "check"), "claude: has a config that does not name this host", "check after a hand edit")
+	f.inlayOK(moved, "hooks", "install")
+	contains(t, f.inlayOK(moved, "check"), "ok: 1 inlay(s)", "check after hooks install")
 }
 
 // An alias at the command position is read through, nested ones too; a

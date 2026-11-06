@@ -35,23 +35,36 @@ type Index struct {
 // with core.ignoreCase needs, paths match claims whatever their case, as
 // git's own ignore and pathspec matching does there.
 func NewIndex(entries []inlay.Entry, fold bool) *Index {
-	x := &Index{fold: fold}
+	x := &Index{owners: owners(entries), fold: fold}
+	x.keys = make([]manifest.Claim, len(x.owners))
+	for i, o := range x.owners {
+		x.keys[i] = x.claimKey(o.Claim)
+	}
+	return x
+}
+
+// owners returns every claim of entries with its inlay, including each
+// manifest's implicit claim on its own file, once each, sorted by path.
+func owners(entries []inlay.Entry) []Owner {
+	var out []Owner
 	seen := map[Owner]bool{}
 	for _, e := range entries {
 		for _, c := range e.Manifest.All() {
 			o := Owner{Inlay: e.Name, Claim: c}
 			if !seen[o] {
 				seen[o] = true
-				x.owners = append(x.owners, o)
+				out = append(out, o)
 			}
 		}
 	}
-	slices.SortFunc(x.owners, func(a, b Owner) int { return strings.Compare(a.Claim.Path, b.Claim.Path) })
-	x.keys = make([]manifest.Claim, len(x.owners))
-	for i, o := range x.owners {
-		x.keys[i] = x.claimKey(o.Claim)
-	}
-	return x
+	slices.SortFunc(out, func(a, b Owner) int { return strings.Compare(a.Claim.Path, b.Claim.Path) })
+	return out
+}
+
+// Union returns the claims an Index over entries holds, which do not
+// depend on folding, for writing the managed block without building one.
+func Union(entries []inlay.Entry) []manifest.Claim {
+	return (&Index{owners: owners(entries)}).Claims()
 }
 
 // key returns p as the index matches it.
