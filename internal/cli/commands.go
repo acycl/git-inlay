@@ -320,11 +320,7 @@ func (c *cli) check(args []string) error {
 			vs = append(vs, guard.RemoteConflicts(hostRemotes, e.Name, rs)...)
 		}
 		for _, e := range s.entries {
-			gone, err := s.worktreeGone(e.Key)
-			if err != nil {
-				return err
-			}
-			if gone {
+			if e.Gone {
 				vs = append(vs, guard.Violation{Path: e.Name, Inlay: e.Name,
 					Reason: fmt.Sprintf("is attached to worktree %s, which no longer exists, so its claims still bind every worktree", e.Key),
 					Fix:    "git inlay prune"})

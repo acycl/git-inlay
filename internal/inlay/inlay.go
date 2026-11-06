@@ -173,14 +173,29 @@ func (i *Inlay) ManifestFile() string {
 // ReadManifest returns the manifest from the working tree, falling back to
 // HEAD when the file is missing and to an empty manifest before any commit.
 func (i *Inlay) ReadManifest() (*manifest.Manifest, error) {
-	data, err := os.ReadFile(i.ManifestFile())
-	if errors.Is(err, os.ErrNotExist) {
-		return ManifestAt(i.Git(), i.Name, "HEAD")
+	return readManifest(i.Host.Root, i.Git(), i.Name, false)
+}
+
+// readManifest reads the manifest of inlay name from the working tree at
+// root, falling back to the commit at HEAD through run when root is empty
+// or the file is missing. With lenient set, as for an inlay of another
+// worktree, a file that cannot be read or parsed falls back to HEAD too:
+// that worktree's own commands report it, and it must not stop this one's.
+func readManifest(root string, run gitx.Runner, name string, lenient bool) (*manifest.Manifest, error) {
+	if root == "" {
+		return ManifestAt(run, name, "HEAD")
 	}
-	if err != nil {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(manifest.File(name))))
+	switch {
+	case err == nil:
+		m, err := manifest.Parse(name, data)
+		if err == nil || !lenient {
+			return m, err
+		}
+	case !errors.Is(err, os.ErrNotExist) && !lenient:
 		return nil, err
 	}
-	return manifest.Parse(i.Name, data)
+	return ManifestAt(run, name, "HEAD")
 }
 
 // ManifestAt reads the manifest committed at rev through run. A missing
@@ -247,10 +262,14 @@ type Entry struct {
 	GitDir   string
 	Manifest *manifest.Manifest
 	Inlay    *Inlay // set when attached to the current worktree
+	Gone     bool   // the linked worktree it is attached to no longer exists
 }
 
-// All lists every inlay attached to any worktree of the host. Manifests of
-// inlays in other worktrees are read from their HEAD.
+// All lists every inlay attached to any worktree of the host. Each
+// manifest is read from its worktree's tree, as the current worktree's
+// is, so a claim staged but not committed in another worktree still
+// counts; an inlay whose worktree is gone, or cannot be found, answers
+// from its HEAD.
 func All(h *host.Host) ([]Entry, error) {
 	var entries []Entry
 	scan := func(key, dir string) error {
@@ -261,17 +280,18 @@ func All(h *host.Host) ([]Entry, error) {
 		if err != nil {
 			return err
 		}
+		root, gone := h.Worktree(key)
 		for _, d := range names {
 			gitDir := filepath.Join(dir, d.Name())
 			if !d.IsDir() || !isRepo(gitDir) || manifest.ValidName(d.Name()) != nil {
 				continue
 			}
-			e := Entry{Key: key, Name: d.Name(), GitDir: gitDir}
+			e := Entry{Key: key, Name: d.Name(), GitDir: gitDir, Gone: gone}
 			if key == h.Key {
 				e.Inlay = &Inlay{Name: e.Name, Key: key, GitDir: gitDir, Host: h}
 				e.Manifest, err = e.Inlay.ReadManifest()
 			} else {
-				e.Manifest, err = ManifestAt(Elsewhere(h, gitDir), e.Name, "HEAD")
+				e.Manifest, err = readManifest(root, Elsewhere(h, gitDir), e.Name, true)
 			}
 			if err != nil {
 				return fmt.Errorf("inlay %s in worktree %s: %w", e.Name, key, err)

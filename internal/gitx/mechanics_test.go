@@ -479,3 +479,61 @@ func TestConfigHookRunsDespiteHooksPath(t *testing.T) {
 		t.Fatalf("config-defined hook stdin = %q, %v", stdin, err)
 	}
 }
+
+// TestWorktreeGitdirFile pins the file git-inlay reads to find a linked
+// worktree's root and to tell whether it is gone, without a process:
+// $C/worktrees/<id>/gitdir names the worktree's .git file, as an absolute
+// path, or since git 2.48 under worktree.useRelativePaths as one relative
+// to $C/worktrees/<id>. Git itself calls the worktree prunable once that
+// file is missing, unless $C/worktrees/<id>/locked exists.
+func TestWorktreeGitdirFile(t *testing.T) {
+	h := newHost(t)
+	base := filepath.Dir(h.root)
+	cases := []struct {
+		id       string
+		relative bool
+	}{{"abs", false}, {"rel", true}}
+	if ok, err := (Runner{}).AtLeast(2, 48); err != nil || !ok {
+		cases = cases[:1]
+	}
+	for _, c := range cases {
+		wt := filepath.Join(base, c.id)
+		args := []string{"worktree", "add", "-q", "-b", c.id, wt}
+		if c.relative {
+			args = append([]string{"-c", "worktree.useRelativePaths=true"}, args...)
+		}
+		h.git(t, args...)
+		admin := filepath.Join(h.root, ".git", "worktrees", c.id)
+		data, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := strings.TrimSpace(string(data))
+		if filepath.IsAbs(p) == c.relative {
+			t.Fatalf("%s: gitdir file = %q, relative = %v", c.id, p, c.relative)
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(admin, p)
+		}
+		if got, want := realPath(t, p), realPath(t, filepath.Join(wt, ".git")); got != want {
+			t.Fatalf("%s: gitdir file resolves to %s, want %s", c.id, got, want)
+		}
+
+		if err := os.RemoveAll(wt); err != nil {
+			t.Fatal(err)
+		}
+		list := h.git(t, "worktree", "list", "--porcelain")
+		if !strings.Contains(list, "prunable") {
+			t.Fatalf("%s: git does not call a deleted worktree prunable:\n%s", c.id, list)
+		}
+		// git worktree lock writes this file; its presence is the lock.
+		writeFile(t, filepath.Join(admin, "locked"), "")
+		if list := h.git(t, "worktree", "list", "--porcelain"); strings.Contains(list, "prunable") {
+			t.Fatalf("%s: git calls a locked worktree prunable:\n%s", c.id, list)
+		}
+		if err := os.Remove(filepath.Join(admin, "locked")); err != nil {
+			t.Fatal(err)
+		}
+		h.git(t, "worktree", "prune")
+	}
+}
