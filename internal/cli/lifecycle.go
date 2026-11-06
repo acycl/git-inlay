@@ -292,14 +292,13 @@ func (c *cli) status(args []string) error {
 	return nil
 }
 
-// inlayStatus gathers one inlay's state, fetching first when asked.
+// inlayStatus gathers one inlay's state, fetching first when asked: one
+// git status --porcelain=v2 --branch answers everything but whether a
+// remote exists, which an upstream does not imply, as it may be a local
+// branch.
 func (c *cli) inlayStatus(in *inlay.Inlay, fetch bool) (inlayState, error) {
 	g := in.Git()
 	var st inlayState
-	st.branch = "detached"
-	if b, err := g.Output("symbolic-ref", "-q", "--short", "HEAD"); err == nil && b != "" {
-		st.branch = b
-	}
 	remotes, err := in.RemoteNames()
 	if err != nil {
 		return st, err
@@ -313,28 +312,40 @@ func (c *cli) inlayStatus(in *inlay.Inlay, fetch bool) (inlayState, error) {
 			c.warnf("fetch for inlay %s failed; showing the last known state", in.Name)
 		}
 	}
-	if up, err := g.Output("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil && up != "" {
-		st.upstream = up
-		counts, err := g.Output("rev-list", "--left-right", "--count", "@{upstream}...HEAD", "--")
-		if err != nil {
-			return st, err
-		}
-		behind, ahead, _ := strings.Cut(counts, "\t")
-		st.behind, _ = strconv.Atoi(behind)
-		st.ahead, _ = strconv.Atoi(ahead)
-	}
-	out, err := g.Output("status", "--porcelain")
+	out, err := g.Output("status", "--porcelain=v2", "--branch")
 	if err != nil {
 		return st, err
 	}
-	for _, line := range strings.Split(out, "\n") {
+	parseStatus(&st, out)
+	return st, nil
+}
+
+// parseStatus fills st from git status --porcelain=v2 --branch output. An
+// upstream counts only with its ahead and behind line, which git omits
+// when the tracking ref is gone, so such a branch reads as having none.
+func parseStatus(st *inlayState, out string) {
+	st.branch = "detached"
+	var upstream string
+	for line := range strings.Lines(out) {
+		line = strings.TrimSuffix(line, "\n")
 		switch {
-		case line == "":
-		case strings.HasPrefix(line, "??"):
+		case strings.HasPrefix(line, "# branch.head "):
+			if b := strings.TrimPrefix(line, "# branch.head "); b != "(detached)" {
+				st.branch = b
+			}
+		case strings.HasPrefix(line, "# branch.upstream "):
+			upstream = strings.TrimPrefix(line, "# branch.upstream ")
+		case strings.HasPrefix(line, "# branch.ab "):
+			if a, b, ok := strings.Cut(strings.TrimPrefix(line, "# branch.ab "), " "); ok {
+				st.ahead, _ = strconv.Atoi(strings.TrimPrefix(a, "+"))
+				st.behind, _ = strconv.Atoi(strings.TrimPrefix(b, "-"))
+				st.upstream = upstream
+			}
+		case strings.HasPrefix(line, "? "):
 			st.untracked++
+		case strings.HasPrefix(line, "#"), line == "":
 		default:
-			st.changed++
+			st.changed++ // "1 ", "2 " or "u "
 		}
 	}
-	return st, nil
 }
