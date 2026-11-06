@@ -24,12 +24,15 @@ jobs:
       - run: git --version
       - run: go vet ./...
       - run: go build ./...
-      - name: test with the race detector
-        if: runner.os != 'Windows'
-        run: go test -race -count=1 ./...
-      - name: test
-        if: runner.os == 'Windows'
-        run: go test -count=1 ./...
+      # No -race: no production code starts a goroutine, and the end-to-end
+      # tests run a binary built without it.
+      - run: go test -count=1 ./...
+      - name: end-to-end coverage
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/cov"
+          GOCOVERDIR="$RUNNER_TEMP/cov" go test -count=1 ./internal/cli
+          go tool covdata percent -i="$RUNNER_TEMP/cov"
 
   gofmt:
     runs-on: ubuntu-latest
@@ -73,7 +76,7 @@ jobs:
       - name: use the built git
         run: echo "$HOME/git-$GIT_VERSION/bin" >> "$GITHUB_PATH"
       - run: git --version
-      - run: go test -race -count=1 ./...
+      - run: go test -count=1 ./...
 
   snapshot:
     name: goreleaser snapshot
