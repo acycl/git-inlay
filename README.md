@@ -17,7 +17,13 @@ go install github.com/acycl/git-inlay/cmd/git-inlay@latest
 ```
 
 or download a release binary and put `git-inlay` on your `PATH`. Git then
-exposes it as `git inlay`. Git 2.40 or later is required.
+exposes it as `git inlay`. Git 2.40 or later is required. Release archives
+carry a build provenance attestation; check one with
+`gh attestation verify <archive> --owner acycl`.
+
+The hooks that `git inlay hooks install` writes look for `git-inlay` on
+`PATH` first and fall back to the binary that installed them, so commits
+from a GUI client that does not see your shell's `PATH` are still guarded.
 
 ## Quick start
 
@@ -84,6 +90,8 @@ problem, naming the path, the owner, and the fix.
 | An upstream commit adds a file at a claimed path | Git overwrites the ignored file on checkout. `git inlay check` reports it; `git rm --cached` plus a commit fixes it, and `git inlay <name> checkout -- <path>` restores the inlay's copy. |
 | `git worktree add` | Run `git inlay attach --all` in the new worktree. Claims already bind there through the shared exclude file and hooks. |
 | `git worktree remove` | `git inlay prune` removes the worktree's inlays, keeping any with unpushed commits unless forced. |
+| `git inlay <name> clean -x` (or `-X`, or `-e '!…'`) or `stash --all`, also behind an alias | Refused. From the inlay's side every host file is an ignored file, so these would act on the whole tree. Run them in the host. |
+| The checkout is moved or renamed | The next `git inlay` command repairs the absolute paths in each inlay's config. |
 | The host's `.gitignore` already ignores a claimed path | The inlay tracks it anyway, but new files under it must be added with `-f`. `claim` warns. |
 
 ## Commands

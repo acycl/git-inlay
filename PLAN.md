@@ -8,7 +8,8 @@ and remote, whose working tree is the host repository's working tree.
 Target uses: a team's `.claude/` configuration on an open-source project, and
 personal research notes kept next to the code they concern.
 
-Status: plan, 2026-10-31. Nothing is implemented yet.
+Status: design record. Written 2026-10-31; every milestone in section 9 is
+done, and the text below is kept in step with the code.
 
 ## 1. Goals and non-goals
 
@@ -198,7 +199,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
 | `git inlay hooks install\|uninstall\|status` | manage the host hook shims (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
-| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above |
+| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` | print version and the git version in use |
 
 Every command except `version` and the `hook` family begins with a sync step:
@@ -207,8 +208,11 @@ and this worktree's inlay excludes, and verify I1 and I2. The hook family
 reads manifests but does not write.
 
 For inlays attached in other worktrees, the manifest is read from the
-inlay's HEAD with `git show HEAD:.git-inlay/<name>.paths`, so the union is
-correct even when that worktree is on disk elsewhere.
+inlay's HEAD with one `git cat-file --batch` query, which answers
+"missing" for an unborn HEAD or an absent file instead of failing, so the
+union is correct even when that worktree is on disk elsewhere. The sync
+step also repairs an inlay whose config no longer names this host, which
+is what a moved checkout leaves behind.
 
 ## 6. Invariants and guards
 
@@ -228,7 +232,7 @@ Guards:
 | claim time | `claim`, `clone`, `attach` | I1 against `git ls-files -z -- <claims>` in the host and against other inlays' manifests |
 | pre-commit | host hook | staged paths (`git diff --cached --name-only -z --diff-filter=ACMR`) under any claim or under `.git-inlay/`; staged deletions never block |
 | pre-push | host hook | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
-| inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the outgoing commits |
+| inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the outgoing commits of each ref, judged by the manifest committed at that ref's tip, which is what a clone will enforce |
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
 
 The pre-push input is accepted in three forms: the stdin lines git provides, the
@@ -251,6 +255,14 @@ What guards do not cover, and the documented answer:
   pre-push guard and the remote check still apply to the inlay side.
 - A teammate without git-inlay installed has none of the files and none of
   the excludes, so has nothing to leak unless they recreate files by hand.
+- The passthrough refusal of `clean -x` and `stash --all` reads the
+  command line as git would: global options before the verb, abbreviated
+  long options, and an alias at the command position, whether from a
+  config file or `-c`, following git's rule that an alias never hides a
+  command. It does not see through a shell alias (`!…`) or a
+  `help.autocorrect` rewrite that expands to one of those forms. It is a
+  safety net against a slip, not a boundary; raw git with `--git-dir`
+  bypasses it by design.
 
 ## 7. Implementation
 
@@ -267,8 +279,14 @@ internal/exclude/            host managed block; inlay negation chain; escaping
 internal/guard/              I1 to I4 checks shared by claim, check, and the hooks
 internal/hooks/              shim content, install, uninstall, hook-manager detection
 internal/remote/             URL normalization and comparison
+internal/atomicfile/         crash-safe replacement of the generated files
 internal/cli/cli_test.go     end-to-end scenarios against the built binary and real git
 ```
+
+The exclude files, manifests and hook shims are written through
+`atomicfile`: a temporary file beside the target, synced, then renamed over
+it, so an interrupted command never leaves a truncated exclude file that
+would let `git add -A` see claimed paths.
 
 `gitx.Runner` holds the git dir, work tree, and working directory. It builds
 every command as `git --git-dir=<abs> --work-tree=<abs> ...`, sets `LC_ALL=C`,
@@ -332,16 +350,20 @@ Shim:
 ```sh
 #!/bin/sh
 # >>> git-inlay >>>
-if command -v git-inlay >/dev/null 2>&1; then
-  exec git-inlay hook pre-push "$@"
-fi
-echo "git-inlay: binary not on PATH; refusing. Run 'git inlay hooks uninstall' to remove this hook." >&2
-exit 1
+bin=$(command -v git-inlay) || bin='/home/me/go/bin/git-inlay'
+[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. Run 'git inlay hooks uninstall' in the host repository to remove this hook." >&2; exit 1; }
+exec "$bin" hook pre-push "$@"
 # <<< git-inlay <<<
 ```
 
-The shim fails closed. The host hooks directory is shared by linked worktrees,
-so one install covers all of them.
+The shim looks for `git-inlay` on `PATH` first, as git does for `git inlay`,
+and falls back to the binary that wrote it, so a GUI client that starts git
+without the user's shell `PATH` still runs the guards. With neither in place
+it fails closed. The inlay's own pre-push shim is rewritten by the
+per-command sync whenever it differs from the current one, so an upgrade of
+git-inlay reaches it; host hooks change only on `hooks install`. The host
+hooks directory is shared by linked worktrees, so one install covers all of
+them.
 
 `hooks status` reports, per hook, one of: installed, managed by
 `core.hooksPath` (snippet printed, verify by hand), present without our
