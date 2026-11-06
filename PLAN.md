@@ -590,8 +590,12 @@ ubuntu, macos, and windows with the runner's git, a gofmt job, and one
 Linux job that builds git 2.40.1 from source (cached) and runs the suite
 against it. Supported floor: git 2.40, chosen for `--git-common-dir` and
 worktree stability; raise it if a needed feature requires more. macOS runs
-exercise a case-insensitive filesystem. Windows runs without the race
-detector. The Claude Code contract test skips on every runner, since none
+exercise a case-insensitive filesystem. No job uses the race detector: no
+production code starts a goroutine, and the end-to-end tests run in
+parallel against a binary built without it. The Linux job also rebuilds
+that binary for coverage (`GOCOVERDIR`, see `TestMain`) and prints the
+end-to-end coverage per package with `go tool covdata percent`. The Claude
+Code contract test skips on every runner, since none
 has the `claude` binary. Nothing has yet run on Windows; the first CI run
 is the first test of the hook shims and drive-letter paths there.
 Releases (`.github/workflows/release.yml`, `.goreleaser.yaml`) build
