@@ -20,7 +20,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # The Go releases are built with, on every OS they ship for; the
+          # oldest-git job runs on the go.mod floor.
+          go-version: stable
       - run: git --version
       - run: go vet ./...
       - run: go build ./...
@@ -52,11 +54,9 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
+      # The action's default Go, stable, is what releases are built with;
+      # the go.mod floor may be a release that no longer gets fixes.
       - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-        with:
-          # Empty, or the action's default of "stable" outranks go.mod.
-          go-version-input: ""
-          go-version-file: go.mod
 
   oldest-git:
     name: oldest supported git
@@ -100,7 +100,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # Releases build with a supported Go, not the go.mod floor.
+          go-version: stable
       - name: build the release artifacts without publishing
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
