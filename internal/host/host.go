@@ -269,9 +269,10 @@ func (h *Host) IgnoreCase() (bool, error) {
 	return *h.ignoreCase, nil
 }
 
-// Staged returns the paths staged as added, copied, modified or renamed.
+// Staged returns the paths staged as added, copied, modified, renamed or
+// changed in type, the same filter the pre-push guard applies to commits.
 func (h *Host) Staged() ([]string, error) {
-	return h.Git().OutputZ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
+	return h.Git().OutputZ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT")
 }
 
 // RemoteNames returns the configured remote names.

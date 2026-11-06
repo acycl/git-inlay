@@ -480,6 +480,32 @@ func TestWorktreeRelativePaths(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "prune", "--dry-run"), "wt/wt\tlocal\twould", "prune --dry-run after the worktree is deleted")
 }
 
+// Pre-commit applies pre-push's diff filter: a staged type change at a
+// claimed path, which only a path leaked past the guards can have, is
+// refused like any other change there.
+func TestPreCommitRefusesTypeChange(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "hooks", "install")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	path := filepath.Join(f.root, ".claude", "settings.json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../README.md", path); err != nil {
+		t.Skipf("cannot make a symlink: %v", err)
+	}
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	if got := f.git(f.root, "diff", "--cached", "--name-status"); !strings.HasPrefix(got, "T") {
+		t.Skipf("git stored the symlink as a file (core.symlinks=false?): %q", got)
+	}
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "retype"), ".claude/settings.json: belongs to inlay claude", "pre-commit on a type change")
+}
+
 // check reads without writing: a stale managed block or inlay exclude is a
 // violation it reports and leaves for any other command to repair.
 func TestCheckReportsStaleExcludes(t *testing.T) {
