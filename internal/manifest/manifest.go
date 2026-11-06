@@ -3,7 +3,6 @@
 package manifest
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -134,9 +133,10 @@ func New(name string) *Manifest { return &Manifest{Name: name} }
 // a claim already covered by an earlier one is dropped.
 func Parse(name string, data []byte) (*Manifest, error) {
 	m := New(name)
-	sc := bufio.NewScanner(bytes.NewReader(data))
-	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimRight(sc.Text(), "\r")
+	n := 0
+	for raw := range bytes.Lines(data) {
+		n++
+		line := strings.TrimRight(string(raw), "\r\n")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -147,9 +147,6 @@ func Parse(name string, data []byte) (*Manifest, error) {
 		if _, err := m.Add(c); err != nil && !errors.Is(err, ErrRedundant) {
 			return nil, fmt.Errorf("%s line %d: %w", File(name), n, err)
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	return m, nil
 }
@@ -181,12 +178,12 @@ func (m *Manifest) Owner(p string) (Claim, bool) {
 	return Claim{}, false
 }
 
-// Add inserts c. It fails with ErrRedundant when an existing claim already
-// covers c, and otherwise removes and returns the existing claims that c
-// covers, including one at the same path whose kind changed.
+// Add inserts c. It fails with ErrRedundant when c is already present or an
+// existing claim covers it, and otherwise removes and returns the existing
+// claims that c covers, including one at the same path whose kind changed.
 func (m *Manifest) Add(c Claim) (absorbed []Claim, err error) {
 	for _, e := range m.Claims {
-		if e.Path != c.Path && e.Owns(c.Path) {
+		if e == c || (e.Path != c.Path && e.Owns(c.Path)) {
 			return nil, ErrRedundant
 		}
 	}

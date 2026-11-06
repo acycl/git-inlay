@@ -74,6 +74,9 @@ func TestAddAbsorbsAndRejects(t *testing.T) {
 	if _, err := m.Add(Claim{Path: "docs/research", Dir: true}); !errors.Is(err, ErrRedundant) {
 		t.Fatalf("Add under docs/ = %v, want ErrRedundant", err)
 	}
+	if _, err := m.Add(Claim{Path: "docs", Dir: true}); !errors.Is(err, ErrRedundant) {
+		t.Fatalf("Add of an identical claim = %v, want ErrRedundant", err)
+	}
 
 	m2 := New("y")
 	m2.Add(Claim{Path: "x"})
