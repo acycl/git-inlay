@@ -300,6 +300,14 @@ What guards do not cover, and the documented answer:
   tree. `git inlay restore` brings them back; `stash pop` also restores them.
 - `--no-verify` on both commit and push bypasses the hooks. The inlay
   pre-push guard and the remote check still apply to the inlay side.
+- `-c core.hooksPath=/dev/null`, which git 2.50 documents as the way to
+  skip hooks for one command, bypasses the shims in the hooks directory;
+  a config-defined guard still runs. That one is turned off by
+  `hook.git-inlay-<hook>.enabled=false` from a scope read after the
+  repository config: `-c`, `GIT_CONFIG_*`, or `config.worktree`.
+  `hooks install` cannot outrank those and says so, and `hooks status`
+  and `check` report the guard `disabled` while it is set from a file.
+  Same class as `--no-verify`, with the same inlay-side guards left.
 - A config-defined guard runs only under git 2.54 or newer. `hooks status`
   and `check` ask the `git` on `PATH`, so on a host whose hook manager
   owns `core.hooksPath` they report the guard `configured` even when a
