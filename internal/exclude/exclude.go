@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/acycl/git-inlay/internal/atomicfile"
 	"github.com/acycl/git-inlay/internal/manifest"
 )
 
@@ -58,18 +59,30 @@ func HostBlock(claims []manifest.Claim) string {
 	return b.String()
 }
 
+// bounds locates the managed block in s: where the begin marker starts and
+// where the end marker's line finishes. ok is false when there is no block.
+func bounds(s string) (begin, end int, ok bool) {
+	begin = strings.Index(s, HostBegin)
+	if begin < 0 {
+		return 0, 0, false
+	}
+	n := strings.Index(s[begin:], HostEnd)
+	if n < 0 {
+		return 0, 0, false
+	}
+	end = begin + n + len(HostEnd)
+	if end < len(s) && s[end] == '\n' {
+		end++
+	}
+	return begin, end, true
+}
+
 // Splice returns content with the managed block replaced, or appended when
 // absent. Everything outside the markers is preserved byte for byte.
 func Splice(content []byte, block string) []byte {
 	s := string(content)
-	begin := strings.Index(s, HostBegin)
-	end := strings.Index(s, HostEnd)
-	if begin >= 0 && end > begin {
-		endLine := end + len(HostEnd)
-		if endLine < len(s) && s[endLine] == '\n' {
-			endLine++
-		}
-		return []byte(s[:begin] + block + s[endLine:])
+	if begin, end, ok := bounds(s); ok {
+		return []byte(s[:begin] + block + s[end:])
 	}
 	if s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
@@ -80,16 +93,11 @@ func Splice(content []byte, block string) []byte {
 // Strip returns content without the managed block.
 func Strip(content []byte) []byte {
 	s := string(content)
-	begin := strings.Index(s, HostBegin)
-	end := strings.Index(s, HostEnd)
-	if begin < 0 || end < begin {
+	begin, end, ok := bounds(s)
+	if !ok {
 		return content
 	}
-	endLine := end + len(HostEnd)
-	if endLine < len(s) && s[endLine] == '\n' {
-		endLine++
-	}
-	return []byte(s[:begin] + s[endLine:])
+	return []byte(s[:begin] + s[end:])
 }
 
 // WriteHost rewrites the host exclude file at path so its managed block
@@ -99,14 +107,31 @@ func WriteHost(path string, claims []manifest.Claim) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	updated := Splice(existing, HostBlock(claims))
+	return replace(path, existing, Splice(existing, HostBlock(claims)))
+}
+
+// RemoveHost drops the managed block from the host exclude file at path,
+// for when no inlay remains. A missing file is left missing.
+func RemoveHost(path string) error {
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return replace(path, existing, Strip(existing))
+}
+
+// replace writes updated over path unless it already holds that content.
+func replace(path string, existing, updated []byte) error {
 	if bytes.Equal(existing, updated) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, updated, 0o644)
+	return atomicfile.WriteFile(path, updated, 0o644)
 }
 
 // Inlay renders the negation chain that makes an inlay ignore everything

@@ -1,6 +1,8 @@
 package exclude
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -66,6 +68,35 @@ func TestSplicePreservesOtherContent(t *testing.T) {
 	}
 	if got := Strip(s); string(got) != "*.log\ntail\n" {
 		t.Fatalf("Strip: %q", got)
+	}
+
+	// A stray end marker before the block must not hide the real one.
+	stray := HostEnd + "\n" + HostBegin + "\n/old\n" + HostEnd + "\n"
+	if got := Splice([]byte(stray), first); string(got) != HostEnd+"\n"+first {
+		t.Fatalf("stray end marker: %q", got)
+	}
+	if got := Strip([]byte(stray)); string(got) != HostEnd+"\n" {
+		t.Fatalf("Strip with stray end marker: %q", got)
+	}
+}
+
+func TestWriteHostAndRemoveHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "exclude")
+	m := claims(t, "claude", ".claude/")
+	if err := WriteHost(path, m.All()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != HostBlock(m.All()) {
+		t.Fatalf("WriteHost on a missing file: %q", got)
+	}
+	if err := RemoveHost(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "" {
+		t.Fatalf("RemoveHost left %q", got)
+	}
+	if err := RemoveHost(filepath.Join(t.TempDir(), "absent")); err != nil {
+		t.Fatalf("RemoveHost on a missing file: %v", err)
 	}
 }
 
