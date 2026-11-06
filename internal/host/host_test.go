@@ -27,10 +27,10 @@ func TestFold(t *testing.T) {
 }
 
 func TestASCII(t *testing.T) {
-	if !ascii([]string{":(literal).claude", "docs/a.md"}) {
-		t.Error("ascii rejected ASCII pathspecs")
+	if !ascii(":(literal).claude/docs/a.md") {
+		t.Error("ascii rejected an ASCII pathspec")
 	}
-	if ascii([]string{":(literal).claude", ":(literal)Café"}) {
+	if ascii(":(literal)Café") {
 		t.Error("ascii accepted a non-ASCII pathspec")
 	}
 }

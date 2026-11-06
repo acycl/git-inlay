@@ -92,15 +92,25 @@ func (c *cli) claim(args []string) error {
 		return err
 	}
 	m := e.Manifest
-	var added []manifest.Claim
+	claims := make([]manifest.Claim, 0, len(paths))
+	var resolveErr error
 	for _, p := range paths {
 		cl, err := s.resolveClaim(p)
 		if err != nil {
-			return err
+			resolveErr = err
+			break
 		}
-		if err := s.vet(name, cl); err != nil {
-			return err
-		}
+		claims = append(claims, cl)
+	}
+	// Report the first path that fails, whether resolving or vetting.
+	if err := s.vet(name, claims); err != nil {
+		return err
+	}
+	if resolveErr != nil {
+		return resolveErr
+	}
+	var added []manifest.Claim
+	for _, cl := range claims {
 		absorbed, err := m.Add(cl)
 		if errors.Is(err, manifest.ErrRedundant) {
 			c.warnf("%s is already covered by a claim of inlay %s", cl, name)
@@ -466,10 +476,8 @@ func (s *session) vetTree(t gitx.Runner, name, rev, source string) (*manifest.Ma
 	if err != nil {
 		return nil, err
 	}
-	for _, cl := range m.Claims {
-		if err := s.vet(name, cl); err != nil {
-			return nil, err
-		}
+	if err := s.vet(name, m.Claims); err != nil {
+		return nil, err
 	}
 	// Checkout silently overwrites ignored files, and a host .gitignore may
 	// well cover claimed paths, so refuse collisions here instead.

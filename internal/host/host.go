@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"unicode"
@@ -163,17 +164,36 @@ func (h *Host) Tracked(pathspecs ...string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if icase && !ascii(pathspecs) {
-		return h.trackedFolded(pathspecs)
+	if !icase {
+		return h.Git().OutputZ(append([]string{"ls-files", "-z", "--"}, pathspecs...)...)
 	}
-	specs := make([]string, len(pathspecs))
-	for i, p := range pathspecs {
-		if icase {
-			p = strings.Replace(p, ":(literal)", ":(literal,icase)", 1)
+	// Git's icase magic folds ASCII letters only, so a pathspec with a
+	// letter beyond ASCII is answered by folding here instead. Splitting
+	// keeps each pathspec's answer the same whatever is asked beside it.
+	var plain, wide []string
+	for _, p := range pathspecs {
+		if ascii(p) {
+			plain = append(plain, strings.Replace(p, ":(literal)", ":(literal,icase)", 1))
+		} else {
+			wide = append(wide, p)
 		}
-		specs[i] = p
 	}
-	return h.Git().OutputZ(append([]string{"ls-files", "-z", "--"}, specs...)...)
+	var out []string
+	if len(plain) > 0 {
+		if out, err = h.Git().OutputZ(append([]string{"ls-files", "-z", "--"}, plain...)...); err != nil {
+			return nil, err
+		}
+	}
+	if len(wide) > 0 {
+		more, err := h.trackedFolded(wide)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, more...)
+		slices.Sort(out)
+		out = slices.Compact(out)
+	}
+	return out, nil
 }
 
 // trackedFolded answers Tracked by folding case itself. Git's icase magic
@@ -205,13 +225,11 @@ func (h *Host) trackedFolded(pathspecs []string) ([]string, error) {
 	return out, nil
 }
 
-// ascii reports whether every string is plain ASCII.
-func ascii(ss []string) bool {
-	for _, s := range ss {
-		for i := range len(s) {
-			if s[i] >= utf8.RuneSelf {
-				return false
-			}
+// ascii reports whether s is plain ASCII.
+func ascii(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
 		}
 	}
 	return true
@@ -253,12 +271,13 @@ func (h *Host) Submodules(paths ...string) (map[string]bool, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	ok, err := h.Git().Succeeds("rev-parse", "--verify", "-q", "HEAD")
-	if err != nil || !ok {
-		return nil, err
-	}
 	entries, err := h.Git().OutputZ(append([]string{"ls-tree", "-z", "HEAD", "--"}, paths...)...)
 	if err != nil {
+		// Before the first commit there is no tree and so no submodule;
+		// ask only now, to spare the common case a process.
+		if ok, verr := h.Git().Succeeds("rev-parse", "--verify", "-q", "HEAD"); verr == nil && !ok {
+			return nil, nil
+		}
 		return nil, err
 	}
 	subs := map[string]bool{}

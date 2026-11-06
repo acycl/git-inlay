@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/exclude"
@@ -361,48 +362,71 @@ func (s *session) resolveClaim(p string) (manifest.Claim, error) {
 	return manifest.ParseClaim(rel)
 }
 
-// vet checks a prospective claim for name against the host and every
-// other inlay (invariant I1 and the submodule rule).
-func (s *session) vet(name string, cl manifest.Claim) error {
-	if o, ok := s.index.Owner(cl.Path); ok && o.Inlay != name {
-		return fmt.Errorf("%s is already owned by inlay %s through its claim %s", cl, o.Inlay, o.Claim)
+// vet checks prospective claims for name against the host and every
+// other inlay (invariant I1 and the submodule rule), and reports the first
+// claim that fails. It asks git once per kind of check for the whole
+// batch, not once per claim.
+func (s *session) vet(name string, claims []manifest.Claim) error {
+	if len(claims) == 0 {
+		return nil
 	}
-	for _, e := range s.entries {
-		if e.Name == name {
-			continue
+	var probes, specs []string
+	for _, cl := range claims {
+		probes = append(append(probes, cl.Ancestors()...), cl.Path)
+		specs = append(specs, cl.Pathspec())
+	}
+	// Claims under one directory share its ancestors.
+	slices.Sort(probes)
+	subs, err := s.host.Submodules(slices.Compact(probes)...)
+	if err != nil {
+		return err
+	}
+	tracked, err := s.host.Tracked(specs...)
+	if err != nil {
+		return err
+	}
+	rules := ignoreRules(s.host.Git(), claimPaths(claims))
+	for _, cl := range claims {
+		if o, ok := s.index.Owner(cl.Path); ok && o.Inlay != name {
+			return fmt.Errorf("%s is already owned by inlay %s through its claim %s", cl, o.Inlay, o.Claim)
 		}
-		for _, other := range e.Manifest.Claims {
-			if s.index.Owns(cl, other.Path) {
-				return fmt.Errorf("%s would contain %s, which inlay %s claims", cl, other, e.Name)
+		for _, e := range s.entries {
+			if e.Name == name {
+				continue
+			}
+			for _, other := range e.Manifest.Claims {
+				if s.index.Owns(cl, other.Path) {
+					return fmt.Errorf("%s would contain %s, which inlay %s claims", cl, other, e.Name)
+				}
 			}
 		}
-	}
-	// Before the tracked check: a path under a submodule matches the
-	// gitlink in ls-files, and "git rm --cached" would be the wrong advice.
-	subs, err := s.host.Submodules(append(cl.Ancestors(), cl.Path)...)
-	if err != nil {
-		return err
-	}
-	for p := range subs {
-		return fmt.Errorf("%s is inside the submodule at %s", cl, p)
-	}
-	tracked, err := s.host.Tracked(cl.Pathspec())
-	if err != nil {
-		return err
-	}
-	if len(tracked) > 0 {
-		shown := tracked
-		if len(shown) > 5 {
-			shown = shown[:5]
+		// Before the tracked check: a path under a submodule matches the
+		// gitlink in ls-files, and "git rm --cached" would be the wrong
+		// advice.
+		for _, p := range append(cl.Ancestors(), cl.Path) {
+			if subs[p] {
+				return fmt.Errorf("%s is inside the submodule at %s", cl, p)
+			}
 		}
-		return fmt.Errorf("%s is tracked by the host (%s%s); remove it from the host first with git rm --cached",
-			cl, strings.Join(shown, ", "), more(len(tracked)-len(shown)))
-	}
-	// A .gitignore negation outranks the managed block, so the host could
-	// never be made to ignore the path.
-	if src, pattern, ok := ignoreMatch(s.host.Git(), cl.Path); ok &&
-		strings.HasPrefix(pattern, "!") && !strings.HasSuffix(filepath.ToSlash(src), "info/exclude") {
-		return fmt.Errorf("%s is re-included by %s (pattern %s), which outranks the exclude file git-inlay manages, so the host cannot be made to ignore it; remove that pattern or choose another path", cl, src, pattern)
+		// A literal pathspec matches beneath a path even when the claim
+		// names a file, so attribute hits as a directory claim would.
+		var hits []string
+		for _, p := range tracked {
+			if s.index.Owns(manifest.Claim{Path: cl.Path, Dir: true}, p) {
+				hits = append(hits, p)
+			}
+		}
+		if len(hits) > 0 {
+			shown := hits[:min(len(hits), 5)]
+			return fmt.Errorf("%s is tracked by the host (%s%s); remove it from the host first with git rm --cached",
+				cl, strings.Join(shown, ", "), more(len(hits)-len(shown)))
+		}
+		// A .gitignore negation outranks the managed block, so the host
+		// could never be made to ignore the path.
+		if r, ok := rules[cl.Path]; ok && strings.HasPrefix(r.pattern, "!") &&
+			!strings.HasSuffix(filepath.ToSlash(r.src), "info/exclude") {
+			return fmt.Errorf("%s is re-included by %s (pattern %s), which outranks the exclude file git-inlay manages, so the host cannot be made to ignore it; remove that pattern or choose another path", cl, r.src, r.pattern)
+		}
 	}
 	return nil
 }

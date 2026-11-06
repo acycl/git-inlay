@@ -249,6 +249,10 @@ func TestClaimRefusals(t *testing.T) {
 
 	contains(t, f.inlayFails(f.root, 1, "claim", "team", "README.md"), "tracked by the host", "claiming a tracked file")
 	contains(t, f.inlayFails(f.root, 1, "claim", "team", "docs"), "tracked by the host", "claiming a tracked directory")
+	// Claims are vetted as a batch, but the first path that fails still
+	// decides the error.
+	contains(t, f.inlayFails(f.root, 1, "claim", "team", "fresh/", "README.md", "../outside"), "README.md is tracked by the host", "first failure in a batch")
+	contains(t, f.inlayFails(f.root, 1, "claim", "team", "fresh/", "../outside", "README.md"), "is outside the repository", "a resolve failure first in a batch")
 	f.inlayOK(f.root, "claim", "team", "private/notes/")
 	contains(t, f.inlayFails(f.root, 1, "claim", "me", "private/notes/today.md"), "already owned by inlay team", "claiming under another inlay")
 	contains(t, f.inlayFails(f.root, 1, "claim", "me", "private/"), "would contain private/notes/, which inlay team claims", "claiming above another inlay")
