@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/acycl/git-inlay/internal/gitx"
 )
@@ -508,6 +509,47 @@ func TestCheckReportsStaleExcludes(t *testing.T) {
 
 	f.inlayOK(f.root, "ls")
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after ls")
+}
+
+// An interrupted clone leaves its staging directory, which no verb takes
+// for an inlay; prune lists and removes it, but not one so recent that a
+// clone may still be filling it.
+func TestPruneAbandonedClone(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "local")
+	old := filepath.Join(f.root, ".git", "inlays", "main", ".clone-old")
+	fresh := filepath.Join(f.root, ".git", "inlays", "main", ".clone-fresh")
+	writeFile(t, filepath.Join(old, "objects", "pack", "x.pack"), "x")
+	writeFile(t, filepath.Join(fresh, "HEAD"), "ref: refs/heads/main\n")
+	// Liveness is the newest time anywhere in the tree, so a recent pack
+	// deep inside keeps a staging directory; age the whole of old.
+	past := time.Now().Add(-48 * time.Hour)
+	for _, p := range []string{filepath.Join(old, "objects", "pack", "x.pack"), filepath.Join(old, "objects", "pack"), filepath.Join(old, "objects"), old} {
+		if err := os.Chtimes(p, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// In fresh only the file inside is recent, as while a fetch writes.
+	if err := os.Chtimes(fresh, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := f.inlayOK(f.root, "prune", "--dry-run"); got != "main\t.clone-old\twould remove (abandoned clone)" {
+		t.Fatalf("prune --dry-run = %q", got)
+	}
+	if !f.exists(".git/inlays/main/.clone-old") {
+		t.Fatal("a dry run removed an abandoned clone")
+	}
+	if got := f.inlayOK(f.root, "prune"); got != "main\t.clone-old\tremoved (abandoned clone)" {
+		t.Fatalf("prune = %q", got)
+	}
+	if f.exists(".git/inlays/main/.clone-old") || !f.exists(".git/inlays/main/.clone-fresh") {
+		t.Fatal("prune removed the wrong staging directory")
+	}
+	if got := f.inlayOK(f.root, "prune"); got != "nothing to prune" {
+		t.Fatalf("prune with only a recent clone = %q", got)
+	}
 }
 
 // Scenario 8: with core.hooksPath set, install writes nothing in the hooks
