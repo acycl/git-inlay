@@ -5,10 +5,12 @@ package host
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode"
 	"unicode/utf8"
 
@@ -59,6 +61,59 @@ func Discover(dir string, env []string) (*Host, error) {
 // that needs the tree does not, and Root is empty.
 func Detached(commonDir string, env []string) *Host {
 	return &Host{GitDir: commonDir, CommonDir: commonDir, Env: env}
+}
+
+// Worktree returns the root of the host worktree behind key, "main" or
+// "wt/<id>", and whether it is gone, from the files git keeps under the
+// common dir, so no process is spent. A linked worktree is gone by the
+// rules git worktree prune applies: its administrative directory, its
+// gitdir file or the .git file that names is missing, and it is not
+// locked, since git keeps a locked worktree through an unmounted volume.
+// Root is empty when it cannot be told: a gone worktree, a main worktree
+// whose git dir is not the .git directory at its root, or a path that
+// cannot be read. Only an absence counts as gone; any other failure, a
+// permission refused or a volume not ready, leaves the worktree standing,
+// since prune deletes what is gone and every command reads every worktree.
+func (h *Host) Worktree(key string) (root string, gone bool) {
+	if key == h.Key && h.Root != "" {
+		return h.Root, false
+	}
+	id, ok := strings.CutPrefix(key, "wt/")
+	if !ok {
+		if filepath.Base(h.CommonDir) == ".git" {
+			return filepath.Dir(h.CommonDir), false
+		}
+		return "", false
+	}
+	admin := filepath.Join(h.CommonDir, "worktrees", id)
+	if _, err := os.Stat(admin); err != nil {
+		return "", absent(err)
+	}
+	_, err := os.Stat(filepath.Join(admin, "locked"))
+	locked := err == nil
+	data, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+	if err != nil {
+		return "", absent(err) && !locked
+	}
+	dotGit := strings.TrimSpace(string(data))
+	if dotGit == "" {
+		return "", !locked
+	}
+	// Git 2.48 writes the path relative to the administrative directory
+	// under worktree.useRelativePaths.
+	if !filepath.IsAbs(dotGit) {
+		dotGit = filepath.Join(admin, dotGit)
+	}
+	if _, err := os.Stat(dotGit); err != nil {
+		return "", absent(err) && !locked
+	}
+	return filepath.Dir(dotGit), false
+}
+
+// absent reports whether err says a path does not exist, counting a file
+// where a directory should be, as git does.
+func absent(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 
 // Git returns a runner for the host, running at its root, or pinned to the

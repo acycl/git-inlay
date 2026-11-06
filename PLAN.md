@@ -224,10 +224,19 @@ read the manifests of all attached inlays, regenerate the host managed block
 and this worktree's inlay excludes, and verify I1 and I2. The hook family
 reads manifests but does not write.
 
-For inlays attached in other worktrees, the manifest is read from the
-inlay's HEAD with one `git cat-file --batch` query, which answers
-"missing" for an unborn HEAD or an absent file instead of failing, so the
-union is correct even when that worktree is on disk elsewhere. The sync
+For inlays attached in other worktrees, the manifest is read from that
+worktree's tree, as for the current one, so a claim staged there but not
+yet committed stays in the union. The worktree's root comes from
+`$C/worktrees/<id>/gitdir`, which names its `.git` file, absolute or,
+since git 2.48 under `worktree.useRelativePaths`, relative to
+`$C/worktrees/<id>`; the main worktree's root is the parent of `$C` when
+`$C` is a `.git` directory. When the worktree is gone, its root cannot be
+told or read, or the file is missing or does not parse, the manifest is
+read from the inlay's HEAD with one `git cat-file --batch` query, which
+answers "missing" for an unborn HEAD or an absent file instead of
+failing; a broken file is that worktree's own commands to report, not a
+reason to stop this one's. Only an absence makes a worktree gone: a
+permission refused or a volume not ready leaves it standing. The sync
 step also repairs an inlay whose config no longer names this host, which
 is what a moved checkout leaves behind.
 
@@ -444,9 +453,11 @@ owns the `.git` file at the worktree root. Objects are duplicated between
 sibling clones; inlay content is small, so this is accepted.
 
 `prune` lists `$C/inlays/wt/<id>/` directories whose `$C/worktrees/<id>` is
-gone, or whose registered worktree path no longer exists and is not locked
-(git keeps a locked worktree through an unmounted volume, and so does
-prune), counts each inlay's commits on no remote (`rev-list HEAD --branches
+gone, or whose gitdir file or the `.git` file it names (resolved against
+`$C/worktrees/<id>` when relative) no longer exists and which is not
+locked (git keeps a locked worktree through an unmounted volume, and so
+does prune): the rules `git worktree prune` applies, read from the files
+without a process. It counts each inlay's commits on no remote (`rev-list HEAD --branches
 --tags --not --remotes`, so an inlay without a remote counts every commit)
 and its stash entries, which no push carries, removes the rest, and keeps
 those unless `--force`, printing the `git --git-dir=<dir> --work-tree=$C

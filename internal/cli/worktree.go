@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,11 +191,7 @@ func (c *cli) prune(args []string) error {
 	}
 	var stale []inlay.Entry
 	for _, e := range s.entries {
-		gone, err := s.worktreeGone(e.Key)
-		if err != nil {
-			return err
-		}
-		if gone {
+		if e.Gone {
 			stale = append(stale, e)
 		}
 	}
@@ -282,30 +277,6 @@ func (c *cli) prune(args []string) error {
 	}
 	fmt.Fprintf(c.o.Stderr, "or remove them anyway with: git inlay prune --force\n")
 	return exitError{exitViolation}
-}
-
-// worktreeGone reports whether the linked worktree behind key has been
-// removed, or had its directory deleted without git worktree remove. A
-// locked worktree is never gone: git itself keeps those through an
-// unmounted volume, and so does prune.
-func (s *session) worktreeGone(key string) (bool, error) {
-	id, ok := strings.CutPrefix(key, "wt/")
-	if !ok {
-		return false, nil
-	}
-	dir := filepath.Join(s.host.CommonDir, "worktrees", id)
-	data, err := os.ReadFile(filepath.Join(dir, "gitdir"))
-	if errors.Is(err, os.ErrNotExist) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if _, err := os.Stat(filepath.Join(dir, "locked")); err == nil {
-		return false, nil
-	}
-	_, err = os.Stat(strings.TrimSpace(string(data)))
-	return errors.Is(err, os.ErrNotExist), nil
 }
 
 // stashes counts the inlay's stash entries, which no push carries.

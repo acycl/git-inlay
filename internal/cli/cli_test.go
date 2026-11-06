@@ -402,6 +402,51 @@ func configHooks(t *testing.T) bool {
 	return ok
 }
 
+// A worktree added with relative paths (git 2.48) is found and not taken
+// for gone, and its inlays' manifests are read from its tree; once its
+// directory is deleted it is gone.
+func TestWorktreeRelativePaths(t *testing.T) {
+	if ok, err := (gitx.Runner{}).AtLeast(2, 48); err != nil || !ok {
+		t.Skip("relative worktree paths need git 2.48 or newer")
+	}
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "local")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "local", "notes")
+	f.inlayOK(f.root, "local", "commit", "-q", "-m", "notes")
+	wt := filepath.Join(f.base, "wts", "wt")
+	f.git(f.root, "-c", "worktree.useRelativePaths=true", "worktree", "add", "-q", wt, "-b", "feature")
+	if got := f.read(".git/worktrees/wt/gitdir"); filepath.IsAbs(strings.TrimSpace(got)) {
+		t.Fatalf("gitdir file = %q, want a relative path", got)
+	}
+	f.inlayOK(wt, "attach", "local")
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check with a relative-path worktree")
+	if got := f.inlayOK(f.root, "prune", "--dry-run"); got != "nothing to prune" {
+		t.Fatalf("prune --dry-run with a relative-path worktree = %q", got)
+	}
+
+	writeFile(t, filepath.Join(wt, "wt-drafts", "a.md"), "a\n")
+	f.inlayOK(wt, "claim", "local", "wt-drafts")
+	f.inlayOK(f.root, "ls")
+	contains(t, f.read(".git/info/exclude"), "/wt-drafts\n", "the managed block after a command in main")
+
+	// A manifest broken by hand in one worktree is that worktree's to
+	// report; another reads the committed one instead of failing.
+	manifest := filepath.Join(wt, ".git-inlay", "local.paths")
+	good := readAt(t, wt, ".git-inlay/local.paths")
+	writeFile(t, manifest, good+"bad\\path\n")
+	f.inlayFails(wt, 1, "ls")
+	contains(t, f.inlayOK(f.root, "ls"), "local\tnotes/", "ls in main beside a broken manifest")
+	writeFile(t, manifest, good)
+
+	if err := os.RemoveAll(filepath.Join(f.base, "wts")); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, f.inlayFails(f.root, 1, "check"), "worktree wt/wt, which no longer exists", "check after the worktree is deleted")
+	contains(t, f.inlayOK(f.root, "prune", "--dry-run"), "wt/wt\tlocal\twould", "prune --dry-run after the worktree is deleted")
+}
+
 // Scenario 8: with core.hooksPath set, install writes nothing in the hooks
 // directory. Git 2.54 and newer get config-defined hooks; older git gets
 // the snippet for the hook manager, and check can only warn.
@@ -848,6 +893,20 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 	}
 	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check in main with a worktree claim")
+
+	// A claim staged but not committed in one worktree survives a command
+	// in another, which reads that worktree's manifest from its tree.
+	f.write("drafts/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "local", "drafts")
+	f.inlayOK(wt, "ls")
+	contains(t, f.read(".git/info/exclude"), "/drafts\n", "the managed block after a command in another worktree")
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status in main after a command in another worktree = %q", got)
+	}
+	f.inlayOK(f.root, "unclaim", "local", "drafts")
+	if err := os.RemoveAll(filepath.Join(f.root, "drafts")); err != nil {
+		t.Fatal(err)
+	}
 
 	// A stash in the worktree's copy is work too.
 	writeFile(t, filepath.Join(wt, ".claude", "settings.json"), "{\"stash\":1}\n")
