@@ -18,8 +18,16 @@ import (
 	"github.com/acycl/git-inlay/internal/gitx"
 )
 
-var binDir string
+var (
+	binDir   string // holds the git-inlay binary the tests run
+	coverDir string // GOCOVERDIR for that binary, when coverage is wanted
+)
 
+// TestMain builds the binary the tests drive. With GOCOVERDIR set it builds
+// for coverage of every package, and each run writes its counters there,
+// which is the only way the end-to-end tests show up in coverage:
+//
+//	mkdir cov && GOCOVERDIR=$PWD/cov go test ./internal/cli && go tool covdata percent -i=cov
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "git-inlay-bin-")
 	if err != nil {
@@ -30,7 +38,11 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", bin, "../../cmd/git-inlay")
+	args := []string{"build", "-o", bin}
+	if coverDir = os.Getenv("GOCOVERDIR"); coverDir != "" {
+		args = append(args, "-cover", "-coverpkg=github.com/acycl/git-inlay/...")
+	}
+	build := exec.Command("go", append(args, "../../cmd/git-inlay")...)
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "build git-inlay:", err)
@@ -67,6 +79,9 @@ func newFixture(t *testing.T) *fixture {
 		"LC_ALL=C",
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"TMPDIR=" + os.TempDir(),
+	}
+	if coverDir != "" {
+		f.env = append(f.env, "GOCOVERDIR="+coverDir)
 	}
 	f.git(base, "init", "-q", "--bare", "-b", "main", f.remote)
 	if err := os.Mkdir(f.root, 0o755); err != nil {
@@ -196,6 +211,7 @@ func contains(t *testing.T, got, want, what string) {
 
 // Scenario 1: init, claim, commit; the host stays clean and add -A stages nothing.
 func TestInitClaimCommit(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	contains(t, f.inlayOK(f.root, "init", "claude"), "initialized inlay claude", "init output")
 	f.write(".claude/settings.json", "{}\n")
@@ -240,6 +256,7 @@ func TestInitClaimCommit(t *testing.T) {
 
 // Scenario 4: claims are refused for host-tracked paths and across inlays.
 func TestClaimRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write("docs/README.md", "d\n")
 	f.git(f.root, "add", "docs")
@@ -268,6 +285,7 @@ func TestClaimRefusals(t *testing.T) {
 
 // Scenario 10: passthrough runs git against the inlay and refuses bad names.
 func TestPassthrough(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	got := f.inlayOK(f.root, "claude", "rev-parse", "--git-dir")
@@ -293,6 +311,7 @@ func TestPassthrough(t *testing.T) {
 
 // Scenario 3: clone onto a fresh host clone restores the files and the exclude block.
 func TestCloneOntoFreshHost(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -329,6 +348,7 @@ func TestCloneOntoFreshHost(t *testing.T) {
 
 // Scenario 5: an inlay remote that resolves to a host remote is refused.
 func TestRemoteGuard(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.git(f.root, "remote", "add", "public", "https://github.com/acme/app.git")
 	for _, u := range []string{"git@github.com:acme/app.git", "ssh://git@github.com/acme/App", "https://github.com/ACME/app/", f.remote} {
@@ -350,6 +370,7 @@ func TestRemoteGuard(t *testing.T) {
 // Scenario 2: the host hooks block a forced add at commit and at push,
 // including after a fast-forward merge that runs no pre-commit hook.
 func TestLeakGuards(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -410,6 +431,7 @@ func configHooks(t *testing.T) bool {
 // for gone, and its inlays' manifests are read from its tree; once its
 // directory is deleted it is gone.
 func TestWorktreeRelativePaths(t *testing.T) {
+	t.Parallel()
 	if ok, err := (gitx.Runner{}).AtLeast(2, 48); err != nil || !ok {
 		t.Skip("relative worktree paths need git 2.48 or newer")
 	}
@@ -454,6 +476,7 @@ func TestWorktreeRelativePaths(t *testing.T) {
 // check reads without writing: a stale managed block or inlay exclude is a
 // violation it reports and leaves for any other command to repair.
 func TestCheckReportsStaleExcludes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -485,6 +508,7 @@ func TestCheckReportsStaleExcludes(t *testing.T) {
 // directory. Git 2.54 and newer get config-defined hooks; older git gets
 // the snippet for the hook manager, and check can only warn.
 func TestHooksPathManaged(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.git(f.root, "config", "core.hooksPath", ".husky")
 	if err := os.MkdirAll(filepath.Join(f.root, ".husky"), 0o755); err != nil {
@@ -510,6 +534,7 @@ func TestHooksPathManaged(t *testing.T) {
 // A hook that is not ours is left alone. Git 2.54 and newer get a
 // config-defined hook beside it; older git tells the user what to add.
 func TestForeignHookLeftAlone(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(".git/hooks/pre-push", "#!/bin/sh\nexit 0\n")
 	out := f.inlayOK(f.root, "hooks", "install")
@@ -528,6 +553,7 @@ func TestForeignHookLeftAlone(t *testing.T) {
 // owns through config-defined hooks that run beside the manager's, and
 // check reports a guard that is missing or disabled.
 func TestConfigHooksBesideHookManager(t *testing.T) {
+	t.Parallel()
 	if !configHooks(t) {
 		t.Skip("config-defined hooks need git 2.54 or newer")
 	}
@@ -652,6 +678,7 @@ func TestConfigHooksBesideHookManager(t *testing.T) {
 
 // Unclaim returns paths to the host's view without touching the files.
 func TestUnclaim(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -672,6 +699,7 @@ func TestUnclaim(t *testing.T) {
 // A commit that only removes a leaked claimed path from the host may be
 // pushed: it is the documented fix, and it publishes nothing new.
 func TestDeletionPushAllowed(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -695,6 +723,7 @@ func TestDeletionPushAllowed(t *testing.T) {
 // the host ignores is tracked anyway, with a warning, while the user's
 // global excludes still apply.
 func TestClaimUnderHostGitignore(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(".gitignore", ".claude/\n")
 	f.git(f.root, "add", ".gitignore")
@@ -735,6 +764,7 @@ func TestClaimUnderHostGitignore(t *testing.T) {
 
 // A global core.hooksPath must not disable the inlay's own push guard.
 func TestGlobalHooksPathKeepsInlayGuard(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.git(f.root, "config", "--global", "core.hooksPath", filepath.Join(f.base, "nohooks"))
 	private := f.bare("x-private")
@@ -750,6 +780,7 @@ func TestGlobalHooksPathKeepsInlayGuard(t *testing.T) {
 // On a case-insensitive filesystem a claim typed in the wrong case is still
 // matched against what the host tracks.
 func TestClaimCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write("CaseProbe", "")
 	if _, err := os.Stat(filepath.Join(f.root, "caseprobe")); err != nil {
@@ -802,6 +833,7 @@ func TestClaimCaseInsensitive(t *testing.T) {
 // manifest directory itself, which the same pattern ignores, is still
 // staged.
 func TestClaimRefusesHostNegation(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.write(".gitignore", ".*\n!.gitignore\n!.claude\n")
 	f.git(f.root, "add", ".gitignore")
@@ -821,6 +853,7 @@ func TestClaimRefusesHostNegation(t *testing.T) {
 // A file sitting where a claimed directory must go would be deleted by
 // checkout, so clone refuses it.
 func TestCloneRefusesFileInTheWay(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -841,6 +874,7 @@ func TestCloneRefusesFileInTheWay(t *testing.T) {
 // A configured global excludes file that does not exist is skipped, as git
 // itself does, instead of failing every claim.
 func TestMissingGlobalExcludesIsSkipped(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.git(f.root, "config", "--global", "core.excludesFile", filepath.Join(f.base, "home", "does-not-exist"))
 	f.inlayOK(f.root, "init", "claude")
@@ -856,6 +890,7 @@ func TestMissingGlobalExcludesIsSkipped(t *testing.T) {
 // across worktrees, and prune removes inlays once their worktree is gone,
 // keeping any with unpushed commits unless forced.
 func TestWorktreeAttachAndPrune(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -1055,6 +1090,7 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 // Scenario 9: detach with and without --keep-files, refusing uncommitted
 // and unpushed work unless forced.
 func TestDetach(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -1126,6 +1162,7 @@ func TestDetach(t *testing.T) {
 // --fetch for the remote's view; --porcelain on ls, which and status gives
 // stable tab-separated lines.
 func TestStatusAndPorcelain(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	if got := f.inlayOK(f.root, "status"); got != "no inlays are attached to this worktree" {
@@ -1176,6 +1213,7 @@ func TestStatusAndPorcelain(t *testing.T) {
 // detach never deletes a file the host also tracks, which an upstream
 // commit at a claimed path can bring about; check reports that instead.
 func TestDetachLeavesHostTrackedFiles(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -1205,6 +1243,7 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 // lefthook snippets do, refuse leaks at commit and at push with git's
 // stdin forwarded.
 func TestHooksPathScriptsRunGuards(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.git(f.root, "config", "core.hooksPath", ".husky")
 	for name, body := range map[string]string{
@@ -1234,6 +1273,7 @@ func TestHooksPathScriptsRunGuards(t *testing.T) {
 // The pre-commit framework runs the guards with no stdin and the refs in
 // environment variables, which is what its snippet relies on.
 func TestPreCommitFrameworkProtocol(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -1272,6 +1312,7 @@ func TestPreCommitFrameworkProtocol(t *testing.T) {
 // history behind the update is scanned: a leak that reached a named remote
 // earlier is still refused on its way to another repository.
 func TestPushByURLScansHistory(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
@@ -1294,6 +1335,7 @@ func TestPushByURLScansHistory(t *testing.T) {
 // A passthrough form that acts on ignored files is refused, since from the
 // inlay's side the whole host tree is ignored; "--" ends flag parsing.
 func TestPassthroughRefusesTreeWideForms(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write("scratch.txt", "untracked in the host\n")
@@ -1321,6 +1363,7 @@ func TestPassthroughRefusesTreeWideForms(t *testing.T) {
 // A failed init leaves neither a git dir that would look attached nor a
 // stray manifest in the tree.
 func TestInitFailureLeavesNothing(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	// An empty ident makes the initial commit fail.
 	_, errOut, code := f.runWith(f.root, []string{"GIT_AUTHOR_NAME=", "GIT_COMMITTER_NAME="}, "git", "inlay", "init", "claude")
@@ -1343,6 +1386,7 @@ func TestInitFailureLeavesNothing(t *testing.T) {
 // carry, not by an uncommitted edit of the working-tree manifest, since the
 // committed one is what a clone enforces.
 func TestInlayPushUsesCommittedManifest(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -1370,6 +1414,7 @@ func TestInlayPushUsesCommittedManifest(t *testing.T) {
 // Moving the host checkout leaves the inlays' absolute paths stale; the
 // next command repairs them, so the inlay's push guard still finds its host.
 func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
 	f.inlayOK(f.root, "init", "claude", "--remote", private)
@@ -1406,6 +1451,7 @@ func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {
 // An alias at the command position is read through, nested ones too; a
 // shell alias cannot be and runs as git would run it.
 func TestPassthroughResolvesAliases(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write("scratch.txt", "untracked in the host\n")
@@ -1474,6 +1520,7 @@ func pathWithoutInlay(t *testing.T) string {
 // git-inlay is not on PATH, as under a GUI client, and still fail closed
 // when that binary is gone too.
 func TestHookShimFallsBackToInstallingBinary(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
 	f.write(".claude/settings.json", "{}\n")
