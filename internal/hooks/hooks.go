@@ -5,11 +5,13 @@ package hooks
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/atomicfile"
+	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/host"
 )
 
@@ -22,22 +24,54 @@ const (
 // names lists the hooks installed in the host repository.
 var names = []string{"pre-commit", "pre-push"}
 
-// State describes one hook file.
+// configSince is the first git 2 minor release that runs hooks defined in
+// config (hook.<name>.command and hook.<name>.event), which it does
+// whatever core.hooksPath says.
+const configSince = 54
+
+// State describes one host hook.
 type State string
 
 // Hook states.
 const (
-	Installed State = "installed" // our shim
-	Managed   State = "managed"   // core.hooksPath is set, so a hook manager owns hooks
-	Foreign   State = "foreign"   // a hook exists that is not ours
-	Absent    State = "absent"
+	Installed  State = "installed"  // our shim in the hooks directory
+	Configured State = "configured" // our hook.git-inlay-<hook> section in the host's config
+	Disabled   State = "disabled"   // that section with enabled = false
+	Managed    State = "managed"    // core.hooksPath is set, so a hook manager owns hooks
+	Foreign    State = "foreign"    // a hook exists that is not ours
+	Absent     State = "absent"
 )
 
 // Status is the state of one host hook.
 type Status struct {
 	Hook  string
-	Path  string
+	Path  string // the hook file, or the config section of a config-defined hook
 	State State
+
+	slot string // the hook file when the hooks directory is free or holds our shim
+}
+
+// Active reports whether git runs the guard for this hook.
+func (s Status) Active() bool { return s.State == Installed || s.State == Configured }
+
+// Report is the state of the host's guards.
+type Report struct {
+	Statuses  []Status
+	HooksPath string // core.hooksPath, when a hook manager has set it
+	Config    bool   // git runs config-defined hooks, so a guard can sit beside any other hook
+}
+
+// Fixable reports whether "git inlay hooks install" would make s active.
+// A hook manager or a foreign hook stands in the way of a shim, so below
+// git 2.54 only the user can wire the guard in there.
+func (r *Report) Fixable(s Status) bool {
+	switch s.State {
+	case Absent, Disabled:
+		return true
+	case Managed, Foreign:
+		return r.Config
+	}
+	return false
 }
 
 // Shim returns the hook script that delegates to a git-inlay hook
@@ -46,6 +80,20 @@ type Status struct {
 // by a GUI client that does not see the user's PATH. With neither in
 // place it fails closed.
 func Shim(sub string) string {
+	return fmt.Sprintf("#!/bin/sh\n%s\n%s \"$@\"\n%s\n", Begin, strings.Join(body(sub), "\n"), End)
+}
+
+// Command returns the host shim as one shell line, for a config-defined
+// hook. Git runs such a command through the shell and appends "$@" when
+// the hook has arguments, as it does for aliases, so the line ends
+// without them.
+func Command(sub string) string {
+	return strings.Join(body(sub), "; ")
+}
+
+// body returns the lines shared by Shim and Command; each completes the
+// final exec with the hook's arguments.
+func body(sub string) []string {
 	hint := "Run 'git inlay hooks uninstall' in the host repository to remove this hook."
 	if sub == "inlay-pre-push" {
 		hint = "Reinstall git-inlay, or delete this hook file to push without the guard."
@@ -54,13 +102,11 @@ func Shim(sub string) string {
 	if bin := binary(); bin != "" {
 		fallback = " || bin=" + shellQuote(bin)
 	}
-	return fmt.Sprintf(`#!/bin/sh
-%s
-bin=$(command -v git-inlay)%s
-[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. %s" >&2; exit 1; }
-exec "$bin" hook %s "$@"
-%s
-`, Begin, fallback, hint, sub, End)
+	return []string{
+		"bin=$(command -v git-inlay)" + fallback,
+		fmt.Sprintf(`[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. %s" >&2; exit 1; }`, hint),
+		`exec "$bin" hook ` + sub,
+	}
 }
 
 // binary returns the path of the running git-inlay, with forward slashes
@@ -78,30 +124,132 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Statuses reports the state of every host hook, and core.hooksPath when a
-// hook manager has set it.
-func Statuses(h *host.Host) ([]Status, string, error) {
+// sectionPrefix starts the config section of every git-inlay
+// config-defined hook.
+const sectionPrefix = "hook.git-inlay-"
+
+// section returns the config section of the config-defined hook for name.
+func section(name string) string { return sectionPrefix + name }
+
+// sections returns the keys of git-inlay's config-defined hooks, by hook
+// name and then by key without the section prefix. With local set it
+// reads the repository config alone, which is what hooks install writes
+// and removes; otherwise it reads every scope and include, as git does
+// when it runs hooks, with the last value of a key winning. Extra
+// arguments go to git config, such as --type=bool.
+func sections(run gitx.Runner, local bool, pattern string, extra ...string) (map[string]map[string]string, error) {
+	args := []string{"config", "-z"}
+	if local {
+		args = append(args, "--local")
+	}
+	args = append(append(args, extra...), "--get-regexp", pattern)
+	entries, err := run.OutputZ(args...)
+	if err != nil {
+		var gerr *gitx.Error
+		if errors.As(err, &gerr) && gerr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := map[string]map[string]string{}
+	for _, e := range entries {
+		k, v, ok := strings.Cut(e, "\n")
+		if !ok {
+			v = "true" // a key with no value is a true boolean
+		}
+		name, key, ok := strings.Cut(strings.TrimPrefix(k, sectionPrefix), ".")
+		if !ok {
+			continue
+		}
+		if out[name] == nil {
+			out[name] = map[string]string{}
+		}
+		out[name][key] = v
+	}
+	return out, nil
+}
+
+// allSections is the pattern that matches every key of every git-inlay
+// config-defined hook.
+const allSections = `^hook\.git-inlay-`
+
+// ours reports whether cfg is a config-defined hook that runs the guard
+// for name: one hooks install wrote, whatever binary it recorded, and not
+// a copy cut short or edited by hand.
+func ours(cfg map[string]string, name string) bool {
+	cmd := cfg["command"]
+	return cfg["event"] == name && strings.HasPrefix(cmd, "bin=$(command -v git-inlay)") &&
+		strings.HasSuffix(cmd, `exec "$bin" hook `+name)
+}
+
+// Statuses reports the state of every host hook. Our shim comes first, as
+// the form every git version runs; a config-defined hook counts where git
+// runs it, judged by the config git reads when it does; otherwise the
+// hooks directory decides.
+func Statuses(h *host.Host) (*Report, error) {
+	run := h.Git()
 	hooksPath, err := h.HooksPath()
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	if hooksPath != "" {
-		var out []Status
-		for _, name := range names {
-			out = append(out, Status{Hook: name, Path: filepath.Join(hooksPath, name), State: Managed})
-		}
-		return out, hooksPath, nil
-	}
-	dir, err := h.HooksDir()
+	supported, err := run.AtLeast(2, configSince)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	var out []Status
+	dir := hooksPath
+	if dir == "" {
+		if dir, err = h.HooksDir(); err != nil {
+			return nil, err
+		}
+	}
+	r := &Report{HooksPath: hooksPath, Config: supported}
+	var cfg map[string]map[string]string
+	off := map[string]bool{}
+	if supported {
+		if cfg, err = sections(run, false, allSections); err != nil {
+			return nil, err
+		}
+		for name, c := range cfg {
+			if v, ok := c["enabled"]; ok && v != "true" {
+				off[name] = true
+			}
+		}
+		// Let git parse the booleans it will act on, which take forms
+		// such as "0k" that a hand-written parser would miss. Git refuses
+		// a value it cannot parse at all, and would fail running the hook
+		// on it too, so such a value stays off for hooks install to
+		// rewrite.
+		if len(off) > 0 {
+			if typed, err := sections(run, false, `^hook\.git-inlay-[^.]*\.enabled$`, "--type=bool"); err == nil {
+				for name := range off {
+					off[name] = typed[name]["enabled"] == "false"
+				}
+			}
+		}
+	}
 	for _, name := range names {
-		path := filepath.Join(dir, name)
-		out = append(out, Status{Hook: name, Path: path, State: state(path)})
+		s := Status{Hook: name, Path: filepath.Join(dir, name)}
+		file := Managed
+		if hooksPath == "" {
+			file = state(s.Path)
+		}
+		if file == Absent || file == Installed {
+			s.slot = s.Path
+		}
+		switch {
+		case file == Installed:
+			s.State = Installed
+		case ours(cfg[name], name):
+			s.Path, s.State = section(name), Configured
+			if off[name] {
+				s.State = Disabled
+			}
+		default:
+			s.State = file
+		}
+		r.Statuses = append(r.Statuses, s)
 	}
-	return out, "", nil
+	return r, nil
 }
 
 // state classifies one hook file.
@@ -118,44 +266,114 @@ func state(path string) State {
 	return Foreign
 }
 
-// Install writes the shims where no other hook is in the way. With a hook
-// manager in charge it writes nothing and returns core.hooksPath.
-func Install(h *host.Host) ([]Status, string, error) {
-	statuses, hooksPath, err := Statuses(h)
-	if err != nil || hooksPath != "" {
-		return statuses, hooksPath, err
-	}
-	for i, s := range statuses {
-		if s.State == Foreign {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
-			return nil, "", err
-		}
-		if err := atomicfile.WriteFile(s.Path, []byte(Shim(s.Hook)), 0o755); err != nil {
-			return nil, "", err
-		}
-		statuses[i].State = Installed
-	}
-	return statuses, "", nil
-}
-
-// Uninstall removes the shims it recognizes and leaves everything else.
-func Uninstall(h *host.Host) ([]Status, error) {
-	statuses, _, err := Statuses(h)
+// Install puts a guard in place for every hook: a shim where the hooks
+// directory has room for one, since every git version runs it, dropping
+// a config-defined hook that would run the guard twice; otherwise, on git
+// 2.54 or newer, a config-defined hook that runs beside the hook manager's
+// or the foreign hook. What it cannot place it leaves. It reports the
+// state that results, read back, so a guard that config read after the
+// repository's still disables shows as such.
+func Install(h *host.Host) (*Report, error) {
+	r, err := Statuses(h)
 	if err != nil {
 		return nil, err
 	}
-	for i, s := range statuses {
+	run := h.Git()
+	local, err := sections(run, true, allSections)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range r.Statuses {
+		switch {
+		case s.slot != "":
+			if err := os.MkdirAll(filepath.Dir(s.slot), 0o755); err != nil {
+				return nil, err
+			}
+			if err := atomicfile.WriteFile(s.slot, []byte(Shim(s.Hook)), 0o755); err != nil {
+				return nil, err
+			}
+			if len(local[s.Hook]) > 0 {
+				if err := dropSection(run, s.Hook); err != nil {
+					return nil, err
+				}
+			}
+		case r.Config:
+			if err := configure(run, s.Hook, local[s.Hook], s.State != Configured); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return Statuses(h)
+}
+
+// dropSection removes the config-defined hook that a shim in this
+// worktree's hooks directory makes redundant. The section is shared by
+// every worktree, though, and with extensions.worktreeConfig set another
+// worktree may point core.hooksPath elsewhere and rely on it, so then it
+// stays; the guard running twice here is the lesser cost.
+func dropSection(run gitx.Runner, name string) error {
+	if perWorktree, err := run.Bool("extensions.worktreeConfig"); err != nil || perWorktree {
+		return err
+	}
+	return run.Run("config", "--local", "--remove-section", section(name))
+}
+
+// configure makes the hook's section in the repository config, got, hold
+// exactly the current command and event, enabled, leaving the config file
+// alone when it already does and the section is in effect. The explicit
+// enabled = true outranks a broader scope's enabled = false, which would
+// otherwise switch the guard off unseen by anyone looking at the
+// repository. A section that holds the right keys but is not in effect,
+// rewrite set, is overridden by an include later in the file, so writing
+// it afresh, at the end, puts it after the include.
+func configure(run gitx.Runner, name string, got map[string]string, rewrite bool) error {
+	want := map[string]string{"command": Command(name), "event": name, "enabled": "true"}
+	if !rewrite && maps.Equal(got, want) {
+		return nil
+	}
+	if len(got) > 0 {
+		if err := run.Run("config", "--local", "--remove-section", section(name)); err != nil {
+			return err
+		}
+	}
+	for _, k := range []string{"command", "event", "enabled"} {
+		if err := run.Run("config", "--local", section(name)+"."+k, want[k]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Uninstall removes the shims and config sections it recognizes and leaves
+// everything else.
+func Uninstall(h *host.Host) (*Report, error) {
+	run := h.Git()
+	local, err := sections(run, true, allSections)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		if len(local[name]) == 0 {
+			continue
+		}
+		if err := run.Run("config", "--local", "--remove-section", section(name)); err != nil {
+			return nil, err
+		}
+	}
+	r, err := Statuses(h)
+	if err != nil {
+		return nil, err
+	}
+	for i, s := range r.Statuses {
 		if s.State != Installed {
 			continue
 		}
 		if err := os.Remove(s.Path); err != nil {
 			return nil, err
 		}
-		statuses[i].State = Absent
+		r.Statuses[i].State = Absent
 	}
-	return statuses, nil
+	return r, nil
 }
 
 // Manager guesses which hook manager the host uses, to pick a snippet.

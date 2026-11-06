@@ -411,16 +411,55 @@ func more(n int) string {
 	return fmt.Sprintf(" and %d more", n)
 }
 
-// hooksReminder warns when the host's leak guards are not installed.
+// hooksReminder warns when a host leak guard is not active.
 func (s *session) hooksReminder() {
-	statuses, hooksPath, err := hooks.Statuses(s.host)
-	if err != nil || hooksPath != "" {
+	vs, warnings, err := s.hookViolations()
+	if err != nil {
 		return
 	}
-	for _, st := range statuses {
-		if st.State != hooks.Installed {
-			s.c.warnf("host leak guards are not installed; run: git inlay hooks install")
-			return
-		}
+	if len(vs) > 0 {
+		s.c.warnf("host leak guards are not active; run: git inlay hooks install")
 	}
+	for _, w := range warnings {
+		s.c.warnf("%s", w)
+	}
+}
+
+// hookViolations reports the host hooks that run no guard while hooks
+// install could put one there. A hook that git-inlay can neither place a
+// guard beside nor read, under a hook manager on git older than 2.54,
+// comes back as a warning instead.
+func (s *session) hookViolations() ([]guard.Violation, []string, error) {
+	if len(s.entries) == 0 {
+		return nil, nil, nil
+	}
+	r, err := hooks.Statuses(s.host)
+	if err != nil {
+		return nil, nil, err
+	}
+	var vs []guard.Violation
+	var warnings []string
+	for _, st := range r.Statuses {
+		action := strings.TrimPrefix(st.Hook, "pre-")
+		var why string
+		switch {
+		case st.Active():
+			continue
+		case !r.Fixable(st):
+			warnings = append(warnings, fmt.Sprintf("cannot verify that %s runs the %s guard; it must call: git-inlay hook %s", st.Path, st.Hook, st.Hook))
+			continue
+		case st.State == hooks.Absent:
+			why = "is not installed"
+		case st.State == hooks.Disabled:
+			why = "is disabled by " + st.Path + ".enabled"
+		default:
+			why = fmt.Sprintf("is %s (%s), so git-inlay cannot verify that it runs the guard", st.State, st.Path)
+		}
+		vs = append(vs, guard.Violation{
+			Path:   "host " + st.Hook + " hook",
+			Reason: why + ", so nothing refuses a " + action + " that carries a claimed path",
+			Fix:    "git inlay hooks install",
+		})
+	}
+	return vs, warnings, nil
 }

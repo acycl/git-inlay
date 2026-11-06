@@ -75,8 +75,14 @@ fast-forward merges of such commits. Each inlay carries its own `pre-push`
 guard that refuses a push to any of the host's remotes and a push of files
 outside its claims.
 
-If a hook manager owns `core.hooksPath`, `hooks install` prints the lines
-to add instead of writing anything.
+If a hook manager owns `core.hooksPath`, or a hook that git-inlay did not
+write is in the way, `hooks install` on git 2.54 or newer adds the guards
+as config-defined hooks (`hook.git-inlay-pre-commit` and
+`hook.git-inlay-pre-push` in `.git/config`), which git runs beside the
+other hooks. On older git it prints the lines to add instead. A GUI client
+that bundles git older than 2.54 skips config-defined hooks, so commit
+from it only if its git is new enough, or add the printed lines to the
+hook manager as well.
 
 `git inlay check` verifies everything at once and exits non-zero on a
 problem, naming the path, the owner, and the fix.

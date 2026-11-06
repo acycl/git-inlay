@@ -330,6 +330,14 @@ func (c *cli) check(args []string) error {
 					Fix:    "git inlay prune"})
 			}
 		}
+		hv, warnings, err := s.hookViolations()
+		if err != nil {
+			return err
+		}
+		vs = append(vs, hv...)
+		for _, w := range warnings {
+			c.warnf("%s", w)
+		}
 		missing, err := s.unexcluded()
 		if err != nil {
 			return err

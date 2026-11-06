@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -153,6 +154,44 @@ func (r Runner) Config(key string) (string, bool, error) {
 		return "", false, err
 	}
 	return out, true, nil
+}
+
+// Bool returns a boolean configuration value as git parses it, false when
+// unset.
+func (r Runner) Bool(key string) (bool, error) {
+	out, err := r.Output("config", "--type=bool", "--get", key)
+	if err != nil {
+		var gerr *Error
+		if errors.As(err, &gerr) && gerr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return out == "true", nil
+}
+
+// AtLeast reports whether git is version major.minor or newer. It parses
+// "git version 2.54.0" and the vendor forms "2.47.1.windows.1" and
+// "2.39.5 (Apple Git-154)".
+func (r Runner) AtLeast(major, minor int) (bool, error) {
+	out, err := r.Output("version")
+	if err != nil {
+		return false, err
+	}
+	f := strings.Fields(out)
+	if len(f) < 3 {
+		return false, fmt.Errorf("unexpected git version output %q", out)
+	}
+	parts := strings.SplitN(f[2], ".", 3)
+	if len(parts) < 2 {
+		return false, fmt.Errorf("unexpected git version output %q", out)
+	}
+	gotMajor, err1 := strconv.Atoi(parts[0])
+	gotMinor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false, fmt.Errorf("unexpected git version output %q", out)
+	}
+	return gotMajor > major || gotMajor == major && gotMinor >= minor, nil
 }
 
 // Succeeds runs git and reports whether it exited zero. An exit status of 1

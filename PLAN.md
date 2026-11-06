@@ -197,7 +197,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay check [--staged]` | run every invariant from section 6; non-zero exit on any violation |
 | `git inlay restore [<name>]` | re-check out tracked inlay files that are missing from the tree, for example after `git clean -x` |
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
-| `git inlay hooks install\|uninstall\|status` | manage the host hook shims (section 7.3) |
+| `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` | print version and the git version in use |
@@ -230,10 +230,11 @@ Guards:
 | Guard | Where | Checks |
 |---|---|---|
 | claim time | `claim`, `clone`, `attach` | I1 against `git ls-files -z -- <claims>` in the host and against other inlays' manifests |
-| pre-commit | host hook | staged paths (`git diff --cached --name-only -z --diff-filter=ACMR`) under any claim or under `.git-inlay/`; staged deletions never block |
-| pre-push | host hook | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
+| pre-commit | host hook (shim, or config-defined on git 2.54+ where the shim cannot go) | staged paths (`git diff --cached --name-only -z --diff-filter=ACMR`) under any claim or under `.git-inlay/`; staged deletions never block |
+| pre-push | host hook (as pre-commit) | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
 | inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the outgoing commits of each ref, judged by the manifest committed at that ref's tip, which is what a clone will enforce |
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
+| hook presence | `check`; a warning from `init`, `clone`, `attach` | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
 
 The pre-push input is accepted in three forms: the stdin lines git provides, the
 `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and `PRE_COMMIT_REMOTE_NAME`
@@ -253,6 +254,12 @@ What guards do not cover, and the documented answer:
   tree. `git inlay restore` brings them back; `stash pop` also restores them.
 - `--no-verify` on both commit and push bypasses the hooks. The inlay
   pre-push guard and the remote check still apply to the inlay side.
+- A config-defined guard runs only under git 2.54 or newer. `hooks status`
+  and `check` ask the `git` on `PATH`, so on a host whose hook manager
+  owns `core.hooksPath` they report the guard `configured` even when a
+  GUI client or IDE commits with an older bundled git that skips it.
+  Commit and push from such a client with git 2.54 or newer, or wire the
+  guard into the hook manager with the snippet as well.
 - A teammate without git-inlay installed has none of the files and none of
   the excludes, so has nothing to leak unless they recreate files by hand.
 - The passthrough refusal of `clean -x` and `stash --all` reads the
@@ -333,17 +340,54 @@ orphaned inlay's history is recovered.
 
 ### 7.3 Host hooks
 
-`hooks install`:
+`hooks install`, for each of `pre-commit` and `pre-push`:
 
-- If `core.hooksPath` is set, a hook manager owns the hooks. Print the snippet
-  for the detected manager (husky from `.husky/`, lefthook from `lefthook.yml`,
-  the pre-commit framework from `.pre-commit-config.yaml`, otherwise generic)
-  and write nothing.
-- Otherwise, for `pre-commit` and `pre-push` in `git rev-parse --git-path
-  hooks`: if the file is absent, write the shim; if it contains our marker,
-  rewrite it; if it exists without our marker, write nothing and print the
-  line to add. Chaining a pre-push hook by appending is unsafe because both
-  scripts would read stdin.
+- With `core.hooksPath` unset, in `git rev-parse --git-path hooks`: if the
+  file is absent, write the shim; if it contains our marker, rewrite it.
+  The shim is preferred because every git version runs it, including the
+  older git a GUI client may bundle.
+- Where the shim cannot go, because `core.hooksPath` is set (a hook manager
+  owns the hooks) or a hook without our marker exists, and git is 2.54 or
+  newer: write a config-defined hook into the host's repository config.
+
+  ```ini
+  [hook "git-inlay-pre-push"]
+      command = "bin=$(command -v git-inlay) || bin='/home/me/go/bin/git-inlay'; [ -x \"$bin\" ] || { ...; exit 1; }; exec \"$bin\" hook pre-push"
+      event = pre-push
+      enabled = true
+  ```
+
+  Git runs it whatever `core.hooksPath` says, before the hooks directory's
+  hook, which still runs too, and the event fails if either does. The
+  command is the shim on one line; git runs it through the shell and
+  appends `"$@"` when the hook has arguments, and forwards stdin. The
+  section is rewritten when it differs or is not in effect, which also
+  re-enables one set to `enabled = false`. Its own `enabled = true`
+  outranks an `enabled = false` in global or system config, and a section
+  that an include later in the file overrides is written afresh at the
+  end of the file, after the include. What git reads after the repository
+  config, `config.worktree` and the command line or `GIT_CONFIG_*`, it
+  cannot outrank; `hooks install` then reports the guard still
+  `disabled` and prints the `git config --show-scope --show-origin`
+  command that finds the setting. Once the
+  hooks directory has room again, the shim replaces the section rather
+  than doubling the guard, except with `extensions.worktreeConfig` set,
+  where another worktree may point `core.hooksPath` elsewhere and rely on
+  the shared section. `hooks status` and `check` judge a section by the
+  config git reads when it runs the hook, every scope and include, with
+  git parsing `enabled`; a section counts as the guard only while its
+  command still has the shim's shape, so a value cut short or edited by
+  hand is reported. It lives in the repository config, never global or
+  system config, where it would also fire inside the inlay repositories.
+- Below git 2.54, where the shim cannot go: write nothing and print the
+  snippet for the detected manager (husky from `.husky/`, lefthook from
+  `lefthook.yml`, the pre-commit framework from `.pre-commit-config.yaml`,
+  otherwise generic), or the line to add to a foreign hook. Chaining a
+  pre-push hook by appending is unsafe because both scripts would read
+  stdin.
+
+`hooks uninstall` removes the shims carrying our marker and the
+`hook.git-inlay-*` sections.
 
 Shim:
 
@@ -362,12 +406,17 @@ without the user's shell `PATH` still runs the guards. With neither in place
 it fails closed. The inlay's own pre-push shim is rewritten by the
 per-command sync whenever it differs from the current one, so an upgrade of
 git-inlay reaches it; host hooks change only on `hooks install`. The host
-hooks directory is shared by linked worktrees, so one install covers all of
-them.
+hooks directory and the repository config are shared by linked worktrees,
+so one install covers all of them.
 
-`hooks status` reports, per hook, one of: installed, managed by
-`core.hooksPath` (snippet printed, verify by hand), present without our
-marker, or absent.
+`hooks status` reports, per hook, one of: `installed` (our shim),
+`configured` (our config-defined hook, on git 2.54 or newer), `disabled`
+(that hook with `enabled = false`), `managed` by `core.hooksPath`,
+`foreign` (present without our marker), or `absent`. `check` reports a hook
+that runs no guard while `hooks install` could place one, which on git 2.54
+or newer is every hook not `installed` or `configured`; below 2.54 a
+`managed` or `foreign` hook cannot be verified, so `check` warns instead,
+as do `init`, `clone` and `attach`.
 
 ### 7.4 Worktrees
 
@@ -431,7 +480,10 @@ exercised:
 6. linked worktree: attach, independent commits, host exclude union, prune
    after `git worktree remove`.
 7. `git clean -xfd` then restore.
-8. `core.hooksPath` set: install prints the snippet and writes nothing.
+8. `core.hooksPath` set: install writes nothing in the hooks directory. On
+   git 2.54 or newer it adds config-defined hooks that run beside the
+   manager's and refuse a leak; below 2.54 it prints the snippet and
+   `check` warns that it cannot verify the hooks.
 9. detach with and without `--keep-files`.
 10. passthrough runs with the right git dir and refuses a verb as a name.
 
