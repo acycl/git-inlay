@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/gitx"
@@ -60,8 +61,11 @@ func (c *cli) init(args []string) error {
 		err = in.Git().Run("remote", "add", "origin", *remoteURL)
 	}
 	if err != nil {
-		// Never leave a half-made inlay behind: it would look attached.
+		// Never leave a half-made inlay behind: it would look attached, and
+		// its manifest would sit in the tree with nothing to hide it.
 		os.RemoveAll(in.GitDir)
+		os.Remove(in.ManifestFile())
+		os.Remove(filepath.Dir(in.ManifestFile()))
 		return err
 	}
 	if err := s.refresh(); err != nil {
@@ -314,15 +318,6 @@ func (c *cli) check(args []string) error {
 				return err
 			}
 			vs = append(vs, guard.RemoteConflicts(hostRemotes, e.Name, rs)...)
-			ok, err := e.Inlay.GuardInstalled()
-			if err != nil {
-				return err
-			}
-			if !ok {
-				vs = append(vs, guard.Violation{Path: e.Name, Inlay: e.Name,
-					Reason: "the inlay's push guard is missing or its core.hooksPath does not point at it",
-					Fix:    "git inlay hooks install"})
-			}
 		}
 		for _, e := range s.entries {
 			gone, err := s.worktreeGone(e.Key)
@@ -335,15 +330,18 @@ func (c *cli) check(args []string) error {
 					Fix:    "git inlay prune"})
 			}
 		}
-		for _, cl := range s.index.Claims() {
-			ok, err := s.host.Git().Succeeds("check-ignore", "-q", "--no-index", "--", cl.Path)
-			if err != nil {
-				return err
+		missing, err := s.unexcluded()
+		if err != nil {
+			return err
+		}
+		for _, cl := range missing {
+			v := guard.Violation{Path: cl.String(), Reason: "is not ignored by the host: a .gitignore pattern outranks the managed exclude block",
+				Fix: "remove the pattern that re-includes it from .gitignore"}
+			if o, ok := s.index.Owner(cl.Path); ok {
+				v.Inlay = o.Inlay
+				v.Fix += fmt.Sprintf("   or   git inlay unclaim %s %s", o.Inlay, cl)
 			}
-			if !ok {
-				vs = append(vs, guard.Violation{Path: cl.String(), Reason: "is not excluded in the host",
-					Fix: "rerun any git inlay command to regenerate .git/info/exclude"})
-			}
+			vs = append(vs, v)
 		}
 	}
 	if len(vs) > 0 {
@@ -552,20 +550,17 @@ func defaultBranch(t gitx.Runner) (string, error) {
 			}
 		}
 	}
-	branches, err := t.Output("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/")
+	branches, err := t.Lines("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/")
 	if err != nil {
 		return "", err
 	}
-	if branches == "" {
+	if len(branches) == 0 {
 		return "", errors.New("the remote has no branches")
 	}
-	for _, b := range strings.Split(branches, "\n") {
-		if b == "origin/main" {
-			return "main", nil
-		}
+	if slices.Contains(branches, "origin/main") {
+		return "main", nil
 	}
-	first, _, _ := strings.Cut(branches, "\n")
-	return strings.TrimPrefix(first, "origin/"), nil
+	return strings.TrimPrefix(branches[0], "origin/"), nil
 }
 
 // manifestName finds the single inlay manifest committed at rev and
@@ -607,7 +602,17 @@ func (c *cli) passthrough(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	code, err := e.Inlay.GitAt(c.o.Dir).Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
+	run := e.Inlay.GitAt(c.o.Dir)
+	expanded := resolveAliases(run, args)
+	if verb, ok := treeWide(expanded); ok {
+		what := "git " + strings.Join(args, " ")
+		if !slices.Equal(expanded, args) {
+			what += ", an alias of git " + strings.Join(expanded, " ") + ","
+		}
+		return fmt.Errorf("refusing to run %s against inlay %s: it would %s every file the inlay ignores, which is the whole host tree; run it in the host instead, or deliberately with: git --git-dir=%s --work-tree=%s %s",
+			what, name, verb, e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
+	}
+	code, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
 	if err != nil {
 		return err
 	}
@@ -615,6 +620,228 @@ func (c *cli) passthrough(name string, args []string) error {
 		return exitError{code}
 	}
 	return nil
+}
+
+// treeWide recognizes the passthrough forms that act on ignored files, and
+// says what they would do to them. From the inlay's side everything outside
+// its claims is ignored, so git clean -x would delete the whole host tree,
+// git clean -e '!pattern' could un-ignore it, and git stash --all would
+// stash it.
+func treeWide(args []string) (verb string, ok bool) {
+	i := gitSubcommand(args)
+	if i < 0 {
+		return "", false
+	}
+	switch args[i] {
+	case "clean":
+		return "remove", cleanTreeWide(args[i+1:])
+	case "stash":
+		return "stash", stashTreeWide(args[i+1:])
+	}
+	return "", false
+}
+
+// resolveAliases replaces an alias at the command position with what git
+// would run in its place, repeatedly, so that treeWide sees the command
+// behind it. It follows git's rules: configuration given with -c on the
+// command line counts, and a name that is a command is never an alias. A
+// shell alias cannot be read and stays, as does a lookup that fails or
+// loops, which git then reports itself.
+func resolveAliases(run gitx.Runner, args []string) []string {
+	seen := map[string]bool{}
+	var commands []string // what git runs before it looks for an alias
+	for {
+		i := gitSubcommand(args)
+		if i < 0 || seen[args[i]] {
+			return args
+		}
+		verb := args[i]
+		seen[verb] = true
+		if verb == "clean" || verb == "stash" {
+			return args // builtins, so this is what runs
+		}
+		cfg := configOptions(args[:i])
+		value, err := run.Output(slices.Concat(cfg, []string{"config", "--get", "alias." + verb})...)
+		if err != nil || strings.HasPrefix(value, "!") {
+			return args
+		}
+		if commands == nil {
+			commands, err = run.Lines(slices.Concat(cfg, []string{"--list-cmds=builtins,main,others"})...)
+			if err != nil {
+				return args
+			}
+		}
+		if slices.Contains(commands, verb) {
+			return args // git ignores an alias that hides a command
+		}
+		words, ok := splitAlias(value)
+		if !ok || len(words) == 0 {
+			return args
+		}
+		args = slices.Concat(args[:i], words, args[i+1:])
+	}
+}
+
+// configOptions returns the -c and --config-env options among git's global
+// options, which set configuration for that one command.
+func configOptions(globals []string) []string {
+	var out []string
+	for i := 0; i < len(globals); i++ {
+		switch a := globals[i]; {
+		case a == "-c" || a == "--config-env":
+			if i+1 < len(globals) {
+				out = append(out, a, globals[i+1])
+				i++
+			}
+		case strings.HasPrefix(a, "--config-env="):
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// splitAlias splits an alias value into words the way git does: on
+// whitespace outside quotes, with single and double quotes grouping and a
+// backslash escaping the next character except inside single quotes. It
+// reports false for an unterminated quote or a trailing backslash, which
+// git rejects too.
+func splitAlias(s string) ([]string, bool) {
+	var words []string
+	var word []byte
+	var quote byte
+	inWord := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote == 0 && strings.ContainsRune(" \t\n\r\v\f", rune(c)):
+			if inWord {
+				words = append(words, string(word))
+				word, inWord = word[:0], false
+			}
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote, inWord = c, true
+		case c == quote:
+			quote = 0
+		default:
+			if c == '\\' && quote != '\'' {
+				i++
+				if i == len(s) {
+					return nil, false
+				}
+				c = s[i]
+			}
+			word, inWord = append(word, c), true
+		}
+	}
+	if quote != 0 {
+		return nil, false
+	}
+	if inWord {
+		words = append(words, string(word))
+	}
+	return words, true
+}
+
+// gitSubcommand returns the index of the command word in args, after
+// git's own options, which may precede it; -1 when there is none.
+func gitSubcommand(args []string) int {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			return i
+		}
+		switch a {
+		case "-c", "-C", "--git-dir", "--work-tree", "--namespace", "--shallow-file", "--config-env", "--attr-source":
+			i++ // the option's value
+		}
+	}
+	return -1
+}
+
+// cleanTreeWide reports whether a clean would reach ignored files: -x or
+// -X asks for them, and a command-line exclude that starts with "!"
+// outranks every ignore file, so it can un-ignore the whole tree.
+func cleanTreeWide(args []string) bool {
+	opts, _ := gitArgs(args, "e", "--exclude")
+	for _, o := range opts {
+		switch {
+		case o.name == "x" || o.name == "X":
+			return true
+		case (o.name == "e" || abbreviates(o.name, "--exclude")) && strings.HasPrefix(o.value, "!"):
+			return true
+		}
+	}
+	return false
+}
+
+// stashTreeWide reports whether a stash would take ignored files along.
+// Only push, spelled out or implied, has that meaning for --all; show and
+// list have their own -a and --all.
+func stashTreeWide(args []string) bool {
+	opts, pos := gitArgs(args, "m", "--message")
+	if len(pos) > 0 && pos[0] != "push" && pos[0] != "save" {
+		return false
+	}
+	for _, o := range opts {
+		if o.name == "a" || abbreviates(o.name, "--all") {
+			return true
+		}
+	}
+	return false
+}
+
+// abbreviates reports whether name is the long option full or a prefix of
+// it, which git accepts whenever the prefix is unambiguous.
+func abbreviates(name, full string) bool {
+	return len(name) > len("--") && strings.HasPrefix(full, name)
+}
+
+// gitOption is one option as git's parser sees it: a short letter or a
+// long name, with its value when it takes one.
+type gitOption struct {
+	name  string // "x" for -x, "--all" for --all
+	value string
+}
+
+// gitArgs splits a command's arguments, up to "--", into options and
+// positionals the way git's parser does. The letters in shortValued and
+// the names in longValued, or abbreviations of them, take a required
+// value, attached (-mfoo, --message=foo) or as the next argument; a letter
+// that does so ends its cluster.
+func gitArgs(args []string, shortValued string, longValued ...string) (opts []gitOption, pos []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return opts, pos
+		case strings.HasPrefix(a, "--"):
+			name, value, has := strings.Cut(a, "=")
+			valued := slices.ContainsFunc(longValued, func(full string) bool { return abbreviates(name, full) })
+			if !has && valued && i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+			opts = append(opts, gitOption{name, value})
+		case strings.HasPrefix(a, "-") && len(a) > 1:
+			cluster := a[1:]
+			for j := range len(cluster) {
+				o := gitOption{name: cluster[j : j+1]}
+				if strings.ContainsRune(shortValued, rune(cluster[j])) {
+					o.value = cluster[j+1:]
+					if o.value == "" && i+1 < len(args) {
+						i++
+						o.value = args[i]
+					}
+					opts = append(opts, o)
+					break
+				}
+				opts = append(opts, o)
+			}
+		default:
+			pos = append(pos, a)
+		}
+	}
+	return opts, pos
 }
 
 // version prints the tool and git versions.

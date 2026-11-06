@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/acycl/git-inlay/internal/atomicfile"
 	"github.com/acycl/git-inlay/internal/exclude"
 	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/hooks"
@@ -50,7 +51,9 @@ func Open(h *host.Host, name string) (*Inlay, error) {
 	return &Inlay{Name: name, Key: h.Key, GitDir: dir, Host: h}, nil
 }
 
-// Create initializes an empty inlay for the host's current worktree.
+// Create initializes an empty inlay for the host's current worktree. A
+// failure part way leaves nothing behind, since a git dir with a HEAD
+// would otherwise look attached.
 func Create(h *host.Host, name string) (*Inlay, error) {
 	if err := manifest.ValidName(name); err != nil {
 		return nil, err
@@ -62,59 +65,83 @@ func Create(h *host.Host, name string) (*Inlay, error) {
 	if err := h.Git().Run("init", "-q", "--bare", "-b", "main", dir); err != nil {
 		return nil, err
 	}
-	return Adopt(h, name, dir)
+	in, err := Adopt(h, name, dir)
+	if err != nil {
+		os.RemoveAll(dir)
+		return nil, err
+	}
+	return in, nil
 }
 
 // Adopt configures an existing bare git dir as an inlay of the host's
 // current worktree and installs its push guard.
 func Adopt(h *host.Host, name, dir string) (*Inlay, error) {
 	in := &Inlay{Name: name, Key: h.Key, GitDir: dir, Host: h}
-	run := in.Git()
-	for _, kv := range [][2]string{
-		{"core.bare", "false"},
-		{"core.worktree", h.Root},
-		{"inlay.name", name},
-		{"inlay.host", h.CommonDir},
-	} {
-		if err := run.Run("config", kv[0], kv[1]); err != nil {
-			return nil, err
-		}
-	}
-	if err := in.InstallGuard(); err != nil {
+	if err := in.Configure(); err != nil {
 		return nil, err
 	}
 	return in, nil
 }
 
-// InstallGuard writes the inlay's pre-push hook and points the inlay's own
-// core.hooksPath at it, so a global core.hooksPath cannot bypass the guard.
-func (i *Inlay) InstallGuard() error {
-	hooksDir := filepath.Join(i.GitDir, "hooks")
-	if err := i.Git().Run("config", "core.hooksPath", hooksDir); err != nil {
-		return err
+// config lists the settings that bind the inlay to its host: the working
+// tree it shares, the common dir its push guard answers from, and its own
+// hooks directory, so a global core.hooksPath cannot bypass the guard.
+func (i *Inlay) config() [][2]string {
+	return [][2]string{
+		{"core.bare", "false"},
+		{"core.worktree", i.Host.Root},
+		{"core.hookspath", i.hooksDir()},
+		{"inlay.name", i.Name},
+		{"inlay.host", i.Host.CommonDir},
 	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(hooksDir, "pre-push"), []byte(hooks.Shim("inlay-pre-push")), 0o755)
 }
 
-// GuardInstalled reports whether the push guard is in place and git will
-// run it.
-func (i *Inlay) GuardInstalled() (bool, error) {
-	hooksDir := filepath.Join(i.GitDir, "hooks")
-	got, _, err := i.Git().Config("core.hooksPath")
+func (i *Inlay) hooksDir() string { return filepath.Join(i.GitDir, "hooks") }
+
+// Configure writes the inlay's config and its pre-push guard. Every
+// command repeats it when Configured says no, which is how a moved
+// checkout gets its absolute paths back.
+func (i *Inlay) Configure() error {
+	run := i.Git()
+	for _, kv := range i.config() {
+		if err := run.Run("config", kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(i.hooksDir(), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(filepath.Join(i.hooksDir(), "pre-push"), []byte(hooks.Shim("inlay-pre-push")), 0o755)
+}
+
+// Configured reports whether the inlay's config still names this host and
+// its push guard is the current shim, so git will run it and an upgrade
+// of git-inlay reaches it on the next command.
+func (i *Inlay) Configured() (bool, error) {
+	entries, err := i.Git().OutputZ("config", "-z", "--get-regexp", `^(core\.(bare|worktree|hookspath)|inlay\.(name|host))$`)
 	if err != nil {
+		var gerr *gitx.Error
+		if errors.As(err, &gerr) && gerr.ExitCode() == 1 {
+			return false, nil
+		}
 		return false, err
 	}
-	if filepath.Clean(got) != hooksDir {
-		return false, nil
+	got := make(map[string]string, len(entries))
+	for _, e := range entries {
+		k, v, _ := strings.Cut(e, "\n")
+		got[k] = v
 	}
-	data, err := os.ReadFile(filepath.Join(hooksDir, "pre-push"))
+	for _, kv := range i.config() {
+		// Git may spell a path with forward slashes on Windows.
+		if filepath.Clean(got[kv[0]]) != filepath.Clean(kv[1]) {
+			return false, nil
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(i.hooksDir(), "pre-push"))
 	if err != nil {
 		return false, nil
 	}
-	return strings.Contains(string(data), hooks.Begin), nil
+	return string(data) == hooks.Shim("inlay-pre-push"), nil
 }
 
 // Git returns a runner pinned to the inlay, running at the host root.
@@ -160,25 +187,22 @@ func (i *Inlay) ReadManifest() (*manifest.Manifest, error) {
 // commit or file yields an empty manifest; any other failure is an error,
 // so a broken inlay never silently loses its claims.
 func ManifestAt(run gitx.Runner, name, rev string) (*manifest.Manifest, error) {
-	ok, err := run.Succeeds("rev-parse", "--verify", "-q", rev+"^{commit}")
+	// One cat-file --batch call both finds and reads the file: an unborn
+	// HEAD, an unknown rev, or an absent path all answer "missing" rather
+	// than failing, so no probing with rev-parse and ls-tree is needed.
+	obj := rev + ":" + manifest.File(name)
+	out, err := run.OutputWithInput([]byte(obj+"\n"), "cat-file", "--batch")
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	header, body, _ := strings.Cut(out, "\n")
+	if strings.HasSuffix(header, " missing") {
 		return manifest.New(name), nil
 	}
-	entries, err := run.OutputZ("ls-tree", "-z", "--name-only", rev, "--", manifest.File(name))
-	if err != nil {
-		return nil, err
+	if fields := strings.Fields(header); len(fields) == 3 && fields[1] == "blob" {
+		return manifest.Parse(name, []byte(body))
 	}
-	if len(entries) == 0 {
-		return manifest.New(name), nil
-	}
-	out, err := run.Output("show", rev+":"+manifest.File(name))
-	if err != nil {
-		return nil, err
-	}
-	return manifest.Parse(name, []byte(out))
+	return nil, fmt.Errorf("%s: cat-file answered %q, not a blob", obj, header)
 }
 
 // WriteManifest writes m to the working tree and stages it in the inlay.
@@ -187,7 +211,7 @@ func (i *Inlay) WriteManifest(m *manifest.Manifest) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, m.Format(), 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, m.Format(), 0o644); err != nil {
 		return err
 	}
 	// -f: a host .gitignore (".*", say) may cover the manifest directory.
@@ -204,20 +228,14 @@ func (i *Inlay) WriteExclude(m *manifest.Manifest) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0o644)
+	return atomicfile.WriteFile(path, content, 0o644)
 }
 
 // Remotes returns the inlay's configured remotes.
 func (i *Inlay) Remotes() ([]remote.Remote, error) { return remote.Configured(i.Git()) }
 
 // RemoteNames returns the inlay's remote names.
-func (i *Inlay) RemoteNames() ([]string, error) {
-	out, err := i.Git().Output("remote")
-	if err != nil || out == "" {
-		return nil, err
-	}
-	return strings.Split(out, "\n"), nil
-}
+func (i *Inlay) RemoteNames() ([]string, error) { return i.Git().Lines("remote") }
 
 // Tracked returns every path the inlay tracks.
 func (i *Inlay) Tracked() ([]string, error) { return i.Git().OutputZ("ls-files", "-z") }

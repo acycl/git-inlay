@@ -98,7 +98,7 @@ func (c *cli) detach(args []string) error {
 			return err
 		}
 		if dirty != "" {
-			return fmt.Errorf("inlay %s has uncommitted changes; commit them with: git inlay %s commit -a, or use --force to discard them", name, name)
+			return fmt.Errorf("inlay %s has uncommitted changes; see them with: git inlay %s status, then commit them or use --force", name, name)
 		}
 		if st, err := stashes(in.Git()); err != nil {
 			return err
@@ -137,23 +137,30 @@ func (c *cli) detach(args []string) error {
 		if err != nil {
 			return err
 		}
+		// The paths come from git and lie inside the tree; os.Root keeps a
+		// symlink that has appeared since from redirecting a delete outside it.
+		root, err := os.OpenRoot(s.host.Root)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
 		for _, p := range files {
 			if slices.Contains(shared, p) {
 				continue
 			}
-			err := os.Remove(filepath.Join(s.host.Root, filepath.FromSlash(p)))
+			err := root.Remove(filepath.FromSlash(p))
 			if err == nil {
 				removed++
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}
-		removeEmptyParents(s.host.Root, files)
+		removeEmptyParents(root, files)
 	}
 	if err := os.RemoveAll(in.GitDir); err != nil {
 		return err
 	}
-	if err := s.rewriteHost(); err != nil {
+	if err := s.refresh(); err != nil {
 		return err
 	}
 	if *keep {
@@ -171,7 +178,7 @@ func (c *cli) detach(args []string) error {
 // removeEmptyParents removes the directories that deleting files left
 // empty, deepest first, never touching root itself. A directory that still
 // holds anything, such as the host's own files, stays.
-func removeEmptyParents(root string, files []string) {
+func removeEmptyParents(root *os.Root, files []string) {
 	dirs := map[string]bool{}
 	for _, f := range files {
 		for _, a := range (manifest.Claim{Path: f}).Ancestors() {
@@ -182,7 +189,7 @@ func removeEmptyParents(root string, files []string) {
 		return cmp.Compare(strings.Count(b, "/"), strings.Count(a, "/"))
 	})
 	for _, d := range sorted {
-		os.Remove(filepath.Join(root, filepath.FromSlash(d)))
+		root.Remove(filepath.FromSlash(d))
 	}
 }
 

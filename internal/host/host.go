@@ -136,13 +136,7 @@ func (h *Host) Staged() ([]string, error) {
 }
 
 // RemoteNames returns the configured remote names.
-func (h *Host) RemoteNames() ([]string, error) {
-	out, err := h.Git().Output("remote")
-	if err != nil || out == "" {
-		return nil, err
-	}
-	return strings.Split(out, "\n"), nil
-}
+func (h *Host) RemoteNames() ([]string, error) { return h.Git().Lines("remote") }
 
 // Submodules reports which of the given root-relative paths are submodule
 // entries in HEAD.

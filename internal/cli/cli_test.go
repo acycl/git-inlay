@@ -413,7 +413,7 @@ func TestForeignHookLeftAlone(t *testing.T) {
 	if f.read(".git/hooks/pre-push") != "#!/bin/sh\nexit 0\n" {
 		t.Fatal("foreign pre-push hook was modified")
 	}
-	contains(t, f.read(".git/hooks/pre-commit"), "git-inlay hook pre-commit", "pre-commit shim")
+	contains(t, f.read(".git/hooks/pre-commit"), "hook pre-commit", "pre-commit shim")
 }
 
 // Unclaim returns paths to the host's view without touching the files.
@@ -1007,4 +1007,214 @@ func TestPushByURLScansHistory(t *testing.T) {
 	f.git(f.root, "push", "-q", "origin", "main")
 	mirror := f.bare("mirror")
 	contains(t, f.gitFails(f.root, "push", "-q", mirror, "main"), ".claude/settings.json: belongs to inlay claude", "push by URL")
+}
+
+// A passthrough form that acts on ignored files is refused, since from the
+// inlay's side the whole host tree is ignored; "--" ends flag parsing.
+func TestPassthroughRefusesTreeWideForms(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write("scratch.txt", "untracked in the host\n")
+	for _, args := range [][]string{
+		{"clean", "-fdx"}, {"clean", "-f", "-X"}, {"clean", "-n", "-x"},
+		{"stash", "--all"}, {"stash", "push", "-a"},
+	} {
+		errOut := f.inlayFails(f.root, 1, append([]string{"claude"}, args...)...)
+		contains(t, errOut, "whole host tree", "refusal of "+strings.Join(args, " "))
+	}
+	if !f.exists("scratch.txt") || !f.exists("README.md") {
+		t.Fatal("a refused command touched the host tree")
+	}
+	// The ordinary forms still run, against the inlay alone.
+	f.inlayOK(f.root, "claude", "clean", "-fdn")
+	f.inlayOK(f.root, "claude", "stash", "list")
+	if !f.exists("scratch.txt") {
+		t.Fatal("clean -n removed a file")
+	}
+	if got := f.inlayOK(f.root, "which", "--", "README.md"); got != "README.md\thost" {
+		t.Fatalf("which -- README.md = %q", got)
+	}
+}
+
+// A failed init leaves neither a git dir that would look attached nor a
+// stray manifest in the tree.
+func TestInitFailureLeavesNothing(t *testing.T) {
+	f := newFixture(t)
+	// An empty ident makes the initial commit fail.
+	_, errOut, code := f.runWith(f.root, []string{"GIT_AUTHOR_NAME=", "GIT_COMMITTER_NAME="}, "git", "inlay", "init", "claude")
+	if code != 3 {
+		t.Fatalf("init with a broken ident: exit %d, want 3\n%s", code, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, ".git", "inlays", "main", "claude")); err == nil {
+		t.Fatal("a failed init left its git dir behind")
+	}
+	if f.exists(".git-inlay") {
+		t.Fatal("a failed init left .git-inlay in the tree")
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after a failed init = %q, want clean", got)
+	}
+	f.inlayOK(f.root, "init", "claude")
+}
+
+// The inlay's push guard judges outgoing commits by the manifest they
+// carry, not by an uncommitted edit of the working-tree manifest, since the
+// committed one is what a clone enforces.
+func TestInlayPushUsesCommittedManifest(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	// A claim added by hand to the tree manifest, with its file committed
+	// but the manifest not: the pushed tip does not cover the file.
+	f.write("notes.md", "private\n")
+	f.write(".git-inlay/claude.paths", f.read(".git-inlay/claude.paths")+"notes.md\n")
+	f.inlayOK(f.root, "claude", "add", "-f", "--", "notes.md")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "notes", "--", "notes.md")
+	_, errOut, code := f.inlay(f.root, "claude", "push", "-q", "origin", "main")
+	if code == 0 {
+		t.Fatal("push of a file outside the committed manifest succeeded")
+	}
+	contains(t, errOut, "notes.md: is in the commits being pushed but under no claim", "inlay pre-push")
+
+	// With the manifest committed too, the same push passes.
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "claim notes", "--", ".git-inlay/claude.paths")
+	f.inlayOK(f.root, "claude", "push", "-q", "origin", "main")
+}
+
+// Moving the host checkout leaves the inlays' absolute paths stale; the
+// next command repairs them, so the inlay's push guard still finds its host.
+func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	moved := filepath.Join(f.base, "moved")
+	if err := os.Rename(f.root, moved); err != nil {
+		t.Fatal(err)
+	}
+	f.root = moved
+	f.inlayOK(moved, "ls")
+	gitDir := filepath.Join(moved, ".git", "inlays", "main", "claude")
+	want := f.git(moved, "rev-parse", "--path-format=absolute", "--show-toplevel")
+	got := f.git(moved, "--git-dir="+gitDir, "--work-tree="+moved, "config", "core.worktree")
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Fatalf("core.worktree after the move = %q, want %q", got, want)
+	}
+	f.inlayOK(moved, "claude", "push", "-q", "origin", "main")
+	contains(t, f.inlayOK(moved, "check"), "ok: 1 inlay(s)", "check after the move")
+}
+
+// An alias at the command position is read through, nested ones too; a
+// shell alias cannot be and runs as git would run it.
+func TestPassthroughResolvesAliases(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write("scratch.txt", "untracked in the host\n")
+	f.git(f.root, "config", "--global", "alias.nuke", "clean -fdx")
+	f.git(f.root, "config", "--global", "alias.nuke2", "nuke")
+	f.git(f.root, "config", "--global", "alias.cl", "clean -fd")
+	f.git(f.root, "config", "--global", "alias.sh", "!echo shell alias")
+	// Git ignores an alias that hides a command, so these must not count.
+	f.git(f.root, "config", "--global", "alias.stash", "stash list")
+	f.git(f.root, "config", "--global", "alias.status", "clean -fdx")
+	for _, args := range [][]string{
+		{"nuke"}, {"nuke2"}, {"cl", "-x"}, {"-c", "clean.requireForce=false", "nuke"},
+		{"-c", "alias.z=clean -fdx", "z"}, {"stash", "--all"},
+	} {
+		errOut := f.inlayFails(f.root, 1, append([]string{"claude"}, args...)...)
+		contains(t, errOut, "whole host tree", "refusal of "+strings.Join(args, " "))
+	}
+	contains(t, f.inlayFails(f.root, 1, "claude", "nuke"), "git nuke, an alias of git clean -fdx,", "expansion in the refusal")
+	if !f.exists("scratch.txt") {
+		t.Fatal("a refused alias touched the host tree")
+	}
+	f.inlayOK(f.root, "claude", "cl", "-n")
+	f.inlayOK(f.root, "claude", "status", "--porcelain")
+	contains(t, f.inlayOK(f.root, "claude", "sh"), "shell alias", "shell alias passthrough")
+}
+
+// pathWithoutInlay returns a PATH that finds git but no git-inlay, so a
+// hook runs the way a GUI client runs it, without the user's PATH. Any
+// installed git-inlay is hidden by dropping its directory; git itself is
+// reached through a link, since it may live in the same directory.
+func pathWithoutInlay(t *testing.T) string {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "git-inlay"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	var dirs []string
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	if runtime.GOOS == "windows" {
+		gitDir := filepath.Dir(gitPath)
+		if !slices.ContainsFunc(dirs, func(d string) bool { return strings.EqualFold(filepath.Clean(d), gitDir) }) {
+			t.Skip("git-inlay is installed beside git, which cannot be hidden without a symlink")
+		}
+		return strings.Join(dirs, string(os.PathListSeparator))
+	}
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(append([]string{bin}, dirs...), string(os.PathListSeparator))
+}
+
+// The hook shims fall back to the binary that installed them when
+// git-inlay is not on PATH, as under a GUI client, and still fail closed
+// when that binary is gone too.
+func TestHookShimFallsBackToInstallingBinary(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "hooks", "install")
+	shim := f.read(".git/hooks/pre-commit")
+	start := strings.Index(shim, "|| bin='")
+	if start < 0 {
+		t.Fatalf("the shim records no fallback path:\n%s", shim)
+	}
+	start += len("|| bin='")
+	end := start + strings.Index(shim[start:], "'")
+
+	noBin := []string{"PATH=" + pathWithoutInlay(t)}
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	_, errOut, code := f.runWith(f.root, noBin, "git", "commit", "-q", "-m", "leak")
+	if code == 0 {
+		t.Fatal("a leaking commit passed with git-inlay off PATH")
+	}
+	contains(t, errOut, ".claude/settings.json: belongs to inlay claude", "pre-commit through the recorded binary")
+	f.git(f.root, "reset", "-q", "--", ".claude/settings.json")
+	f.write("CHANGELOG.md", "x\n")
+	f.git(f.root, "add", "CHANGELOG.md")
+	if _, errOut, code := f.runWith(f.root, noBin, "git", "commit", "-q", "-m", "clean"); code != 0 {
+		t.Fatalf("a clean commit failed with git-inlay off PATH:\n%s", errOut)
+	}
+
+	f.write(".git/hooks/pre-commit", shim[:start]+"/nonexistent/git-inlay"+shim[end:])
+	f.write("CHANGELOG.md", "y\n")
+	f.git(f.root, "add", "CHANGELOG.md")
+	_, errOut, code = f.runWith(f.root, noBin, "git", "commit", "-q", "-m", "blind")
+	if code == 0 {
+		t.Fatal("a commit passed with git-inlay nowhere to be found")
+	}
+	contains(t, errOut, "binary not on PATH or at /nonexistent/git-inlay; refusing", "fail-closed message")
 }

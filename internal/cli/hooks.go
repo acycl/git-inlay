@@ -13,7 +13,6 @@ import (
 	"github.com/acycl/git-inlay/internal/hooks"
 	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
-	"github.com/acycl/git-inlay/internal/manifest"
 	"github.com/acycl/git-inlay/internal/remote"
 )
 
@@ -33,7 +32,7 @@ func (c *cli) hooks(args []string) error {
 		statuses, hooksPath, err = hooks.Install(s.host)
 		for _, e := range s.mine() {
 			if err == nil {
-				err = e.Inlay.InstallGuard()
+				err = e.Inlay.Configure()
 			}
 		}
 	case "uninstall":
@@ -50,7 +49,7 @@ func (c *cli) hooks(args []string) error {
 		c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
 	}
 	for _, e := range s.mine() {
-		ok, err := e.Inlay.GuardInstalled()
+		ok, err := e.Inlay.Configured()
 		if err != nil {
 			return err
 		}
@@ -217,17 +216,6 @@ func (c *cli) hookInlayPrePush(args []string) error {
 		}
 	}
 
-	var m *manifest.Manifest
-	if h.Root == "" {
-		// No tree to read the manifest from; the committed one is the
-		// only one there is.
-		m, err = inlay.ManifestAt(in.Git(), name, "HEAD")
-	} else {
-		m, err = in.ReadManifest()
-	}
-	if err != nil {
-		return err
-	}
 	updates, err := guard.ParseRefUpdates(c.o.Stdin)
 	if err != nil {
 		return err
@@ -236,18 +224,34 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	if err != nil {
 		return err
 	}
-	paths, err := guard.OutgoingPaths(in.Git(), updates, remoteName, slices.Contains(names, remoteName))
-	if err != nil {
-		return err
-	}
+	named := slices.Contains(names, remoteName)
 	var vs []guard.Violation
-	for _, p := range paths {
-		if _, ok := m.Owner(p); !ok {
+	seen := map[string]bool{}
+	for _, u := range updates {
+		if guard.IsZero(u.LocalOID) {
+			continue
+		}
+		// The receiving side sees the manifest committed at the pushed tip,
+		// so that is what the outgoing paths must satisfy (I3), whatever an
+		// uncommitted edit of the working-tree manifest says.
+		m, err := inlay.ManifestAt(in.Git(), name, u.LocalOID)
+		if err != nil {
+			return err
+		}
+		paths, err := guard.OutgoingPaths(in.Git(), []guard.RefUpdate{u}, remoteName, named)
+		if err != nil {
+			return err
+		}
+		for _, p := range paths {
+			if _, ok := m.Owner(p); ok || seen[p] {
+				continue
+			}
+			seen[p] = true
 			vs = append(vs, guard.Violation{
 				Path:   p,
 				Inlay:  name,
 				Reason: "is in the commits being pushed but under no claim of inlay " + name,
-				Fix:    fmt.Sprintf("git inlay claim %s %q, or remove it from the commits", name, p),
+				Fix:    fmt.Sprintf("git inlay claim %s %q and commit, or remove it from the commits", name, p),
 			})
 		}
 	}

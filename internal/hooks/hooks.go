@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/acycl/git-inlay/internal/atomicfile"
 	"github.com/acycl/git-inlay/internal/host"
 )
 
@@ -18,8 +19,8 @@ const (
 	End   = "# <<< git-inlay <<<"
 )
 
-// Host lists the hooks installed in the host repository.
-var Host = []string{"pre-commit", "pre-push"}
+// names lists the hooks installed in the host repository.
+var names = []string{"pre-commit", "pre-push"}
 
 // State describes one hook file.
 type State string
@@ -40,21 +41,41 @@ type Status struct {
 }
 
 // Shim returns the hook script that delegates to a git-inlay hook
-// subcommand. It fails closed when the binary is missing.
+// subcommand. It looks for git-inlay on PATH, as git itself does for git
+// inlay, and falls back to the binary that wrote the shim, for a hook run
+// by a GUI client that does not see the user's PATH. With neither in
+// place it fails closed.
 func Shim(sub string) string {
 	hint := "Run 'git inlay hooks uninstall' in the host repository to remove this hook."
 	if sub == "inlay-pre-push" {
 		hint = "Reinstall git-inlay, or delete this hook file to push without the guard."
 	}
+	fallback := ""
+	if bin := binary(); bin != "" {
+		fallback = " || bin=" + shellQuote(bin)
+	}
 	return fmt.Sprintf(`#!/bin/sh
 %s
-if command -v git-inlay >/dev/null 2>&1; then
-  exec git-inlay hook %s "$@"
-fi
-echo "git-inlay: binary not on PATH; refusing. %s" >&2
-exit 1
+bin=$(command -v git-inlay)%s
+[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. %s" >&2; exit 1; }
+exec "$bin" hook %s "$@"
 %s
-`, Begin, sub, hint, End)
+`, Begin, fallback, hint, sub, End)
+}
+
+// binary returns the path of the running git-inlay, with forward slashes
+// so that sh on Windows reads it, or "" when it cannot be found.
+func binary() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(exe)
+}
+
+// shellQuote wraps s in single quotes for sh.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // Statuses reports the state of every host hook, and core.hooksPath when a
@@ -66,7 +87,7 @@ func Statuses(h *host.Host) ([]Status, string, error) {
 	}
 	if hooksPath != "" {
 		var out []Status
-		for _, name := range Host {
+		for _, name := range names {
 			out = append(out, Status{Hook: name, Path: filepath.Join(hooksPath, name), State: Managed})
 		}
 		return out, hooksPath, nil
@@ -76,7 +97,7 @@ func Statuses(h *host.Host) ([]Status, string, error) {
 		return nil, "", err
 	}
 	var out []Status
-	for _, name := range Host {
+	for _, name := range names {
 		path := filepath.Join(dir, name)
 		out = append(out, Status{Hook: name, Path: path, State: state(path)})
 	}
@@ -111,7 +132,7 @@ func Install(h *host.Host) ([]Status, string, error) {
 		if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 			return nil, "", err
 		}
-		if err := os.WriteFile(s.Path, []byte(Shim(s.Hook)), 0o755); err != nil {
+		if err := atomicfile.WriteFile(s.Path, []byte(Shim(s.Hook)), 0o755); err != nil {
 			return nil, "", err
 		}
 		statuses[i].State = Installed

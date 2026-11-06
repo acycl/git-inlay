@@ -131,12 +131,12 @@ func ignoreMatch(run gitx.Runner, path string) (src, pattern string, ok bool) {
 	return fields[0], fields[2], true
 }
 
-// verifyExcluded warns about claims the host does not ignore even after
-// the managed block was written, which a .gitignore negation can cause.
-func (s *session) verifyExcluded() {
+// unexcluded returns the claims the host does not ignore even with the
+// managed block in place, which a .gitignore negation causes.
+func (s *session) unexcluded() ([]manifest.Claim, error) {
 	claims := s.index.Claims()
 	if len(claims) == 0 {
-		return
+		return nil, nil
 	}
 	var input bytes.Buffer
 	for _, cl := range claims {
@@ -145,20 +145,23 @@ func (s *session) verifyExcluded() {
 	}
 	ignored, err := s.host.Git().OutputZWithInput(input.Bytes(), "check-ignore", "-z", "--no-index", "--stdin")
 	if err != nil {
+		// Exit 1 means no path is ignored, which the loop below reports.
 		var gerr *gitx.Error
 		if !errors.As(err, &gerr) || gerr.ExitCode() != 1 {
-			return // exit 1 means nothing is ignored, which the loop reports
+			return nil, err
 		}
 	}
-	set := map[string]bool{}
+	set := make(map[string]bool, len(ignored))
 	for _, p := range ignored {
 		set[p] = true
 	}
+	var out []manifest.Claim
 	for _, cl := range claims {
 		if !set[cl.Path] {
-			s.c.warnf("the host does not ignore %s; a .gitignore pattern outranks the managed exclude block, so the host hooks are the only guard for it. Run: git inlay check", cl)
+			out = append(out, cl)
 		}
 	}
+	return out, nil
 }
 
 // warnIgnored tells the user when a host .gitignore file ignores a claim.
@@ -179,6 +182,17 @@ func (s *session) warnIgnored(in *inlay.Inlay, claims []manifest.Claim) {
 // host's history, since checking out such a commit in the host would
 // overwrite the inlay's files with the host's copy.
 func (s *session) warnHistory(claims []manifest.Claim) {
+	if len(claims) > 1 {
+		// Each query walks the whole history when the path was never
+		// there, so settle the usual case of no hits with one walk.
+		args := []string{"rev-list", "--all", "-n", "1", "--"}
+		for _, cl := range claims {
+			args = append(args, cl.Pathspec())
+		}
+		if out, err := s.host.Git().Output(args...); err != nil || out == "" {
+			return
+		}
+	}
 	for _, cl := range claims {
 		out, err := s.host.Git().Output("rev-list", "--all", "-n", "1", "--", cl.Pathspec())
 		if err == nil && len(out) >= 7 {

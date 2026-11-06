@@ -126,13 +126,13 @@ func (s *session) attachOne(name string) error {
 			return err
 		}
 	}
-	if refs, err := g.Output("for-each-ref", "--format=%(refname)", "refs/sibling/"); err == nil {
-		for _, r := range strings.Split(refs, "\n") {
-			if r != "" {
-				if err := g.Run("update-ref", "-d", r); err != nil {
-					return err
-				}
-			}
+	refs, err := g.Lines("for-each-ref", "--format=%(refname)", "refs/sibling/")
+	if err != nil {
+		return err
+	}
+	for _, r := range refs {
+		if err := g.Run("update-ref", "-d", r); err != nil {
+			return err
 		}
 	}
 	if err := s.refresh(); err != nil {
@@ -253,7 +253,7 @@ func (c *cli) prune(args []string) error {
 	if *dryRun {
 		return nil
 	}
-	if err := s.rewriteHost(); err != nil {
+	if err := s.refresh(); err != nil {
 		return err
 	}
 	if len(kept) == 0 {
@@ -310,11 +310,8 @@ func (s *session) worktreeGone(key string) (bool, error) {
 
 // stashes counts the inlay's stash entries, which no push carries.
 func stashes(run gitx.Runner) (int, error) {
-	out, err := run.Output("stash", "list")
-	if err != nil || out == "" {
-		return 0, err
-	}
-	return len(strings.Split(out, "\n")), nil
+	entries, err := run.Lines("stash", "list")
+	return len(entries), err
 }
 
 // unpushed counts commits on the inlay's branches and tags, and on a

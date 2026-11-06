@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -39,7 +38,7 @@ const (
 	exitGit       = 3
 )
 
-// reserved lists every verb, present and planned, so none can name an inlay.
+// reserved lists every verb, so none can name an inlay.
 var reserved = map[string]bool{
 	"init": true, "clone": true, "attach": true, "detach": true, "claim": true,
 	"unclaim": true, "ls": true, "which": true, "status": true, "check": true,
@@ -168,9 +167,6 @@ func (c *cli) dispatch(args []string) error {
 	case "version":
 		return c.version()
 	}
-	if reserved[verb] {
-		return usagef("%s is not implemented yet", verb)
-	}
 	if err := manifest.ValidName(verb); err != nil {
 		return usagef("unknown command %q", verb)
 	}
@@ -185,6 +181,7 @@ func (c *cli) flagSet(name string) *flag.FlagSet {
 }
 
 // parseArgs parses flags wherever they appear and returns the positionals.
+// After a "--" everything is positional, even what looks like a flag.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
@@ -194,6 +191,9 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 		rest := fs.Args()
 		if len(rest) == 0 {
 			return pos, nil
+		}
+		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			return append(pos, rest...), nil
 		}
 		pos = append(pos, rest[0])
 		args = rest[1:]
@@ -260,61 +260,45 @@ func (s *session) reload() error {
 	return nil
 }
 
-// refresh rereads every manifest and regenerates the exclude files.
+// refresh rereads every manifest and regenerates the exclude files. With
+// no inlay left it drops the managed block instead.
 func (s *session) refresh() error {
 	if err := s.reload(); err != nil {
 		return err
 	}
 	if len(s.entries) == 0 {
-		return nil
+		return exclude.RemoveHost(s.host.ExcludeFile())
 	}
 	if err := exclude.WriteHost(s.host.ExcludeFile(), s.index.Claims()); err != nil {
 		return err
 	}
-	for _, e := range s.entries {
-		if e.Inlay == nil {
-			continue
-		}
+	for _, e := range s.mine() {
 		if err := e.Inlay.WriteExclude(e.Manifest); err != nil {
 			return err
 		}
-		// The push guard's hooksPath is absolute, so a moved checkout loses
-		// it; put it back on every command rather than only on check.
-		ok, err := e.Inlay.GuardInstalled()
+		// The inlay's config holds absolute paths, so a moved checkout
+		// loses its push guard and its host; put them back on every command.
+		ok, err := e.Inlay.Configured()
 		if err != nil {
 			return err
 		}
 		if !ok {
-			if err := e.Inlay.InstallGuard(); err != nil {
+			if err := e.Inlay.Configure(); err != nil {
 				return err
 			}
 		}
 	}
-	s.verifyExcluded()
-	return nil
-}
-
-// rewriteHost regenerates the managed block from the inlays that remain
-// after one was removed, and drops the block when none are left.
-func (s *session) rewriteHost() error {
-	if err := s.reload(); err != nil {
-		return err
-	}
-	if len(s.entries) > 0 {
-		return exclude.WriteHost(s.host.ExcludeFile(), s.index.Claims())
-	}
-	data, err := os.ReadFile(s.host.ExcludeFile())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	missing, err := s.unexcluded()
 	if err != nil {
-		return err
+		// A claim beyond a symlink makes check-ignore refuse the whole
+		// batch. That is for check to report, not for every verb to fail
+		// on, including the unclaim that would resolve it.
+		s.c.warnf("could not verify that the host ignores every claim: %v", err)
 	}
-	stripped := exclude.Strip(data)
-	if bytes.Equal(stripped, data) {
-		return nil
+	for _, cl := range missing {
+		s.c.warnf("the host does not ignore %s; a .gitignore pattern outranks the managed exclude block, so the host hooks are the only guard for it. Run: git inlay check", cl)
 	}
-	return os.WriteFile(s.host.ExcludeFile(), stripped, 0o644)
+	return nil
 }
 
 // mine returns the entries attached to the current worktree.
