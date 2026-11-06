@@ -17,7 +17,8 @@ go install github.com/acycl/git-inlay/cmd/git-inlay@latest
 ```
 
 or download a release binary and put `git-inlay` on your `PATH`. Git then
-exposes it as `git inlay`. Git 2.40 or later is required. Release archives
+exposes it as `git inlay`. `go install` needs Go 1.24 or later. Git 2.40 or
+later is required. Release archives
 carry a build provenance attestation; check one with
 `gh attestation verify <archive> --owner acycl`.
 

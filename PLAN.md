@@ -598,7 +598,12 @@ end-to-end coverage per package with `go tool covdata percent`. Every
 action is pinned to a commit SHA with its version in a trailing comment,
 which Dependabot keeps current; the oldest-git job checks the git tarball
 against kernel.org's published SHA-256 before building; a govulncheck job
-scans the module and the standard library it uses. The release workflow's
+scans the module and the standard library it uses. `go.mod` names the
+oldest Go the code builds with (1.24, for `strings.Lines` and
+`os.OpenRoot`), the floor for `go install`, and the oldest-git job tests
+on it; the OS matrix, govulncheck and the release and snapshot builds use
+the current stable Go, so every shipped binary is built by a toolchain
+tested on its OS and carrying the latest security fixes. The release workflow's
 attestation step needs the repository to be public, or on GitHub
 Enterprise Cloud. The Claude
 Code contract test skips on every runner, since none
