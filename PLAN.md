@@ -219,8 +219,8 @@ command line are relative to the current directory and are normalized against
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` | print version and the git version in use |
 
-Every command except `version` and the `hook` family begins with a sync step:
-read the manifests of all attached inlays and regenerate the host managed
+Every command except `version`, `check` and the `hook` family begins with a
+sync step: read the manifests of all attached inlays and regenerate the host managed
 block and this worktree's inlay excludes, without starting a git process
 beyond host discovery, a manifest read from HEAD where the file is
 missing (below), and the repair of a moved checkout. The claim verbs
@@ -229,8 +229,11 @@ missing (below), and the repair of a moved checkout. The claim verbs
 with one `git check-ignore` and warn on a claim the host does not ignore;
 `check` reports the same as a violation, and is the only place a manifest
 changed through passthrough, such as by a pull, is checked. The hook
-family reads manifests
-but does not write.
+family and `check` read manifests but do not write: `check` reports an
+exclude file that differs from what the sync step would write (a stale
+managed block, or an inlay's stale `info/exclude`) as a violation fixed
+by any command that runs the sync step, so it can see a hand edit and runs on a read-only
+`.git`.
 
 For inlays attached in other worktrees, the manifest is read from that
 worktree's tree, as for the current one, so a claim staged there but not

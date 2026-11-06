@@ -97,7 +97,7 @@ problem, naming the path, the owner, and the fix.
 | `git worktree add` | Run `git inlay attach --all` in the new worktree. Claims already bind there through the shared exclude file and hooks. |
 | `git worktree remove` | `git inlay prune` removes the worktree's inlays, keeping any with unpushed commits unless forced. |
 | `git inlay <name> clean -x` (or `-X`, or `-e '!…'`) or `stash --all`, also behind an alias | Refused. From the inlay's side every host file is an ignored file, so these would act on the whole tree. Run them in the host. |
-| The checkout is moved or renamed | The next `git inlay` command repairs the absolute paths in each inlay's config. |
+| The checkout is moved or renamed | The next `git inlay` command other than `check`, which reports it, repairs the absolute paths in each inlay's config. |
 | The host's `.gitignore` already ignores a claimed path | The inlay tracks it anyway, but new files under it must be added with `-f`. `claim` warns. |
 
 ## Commands

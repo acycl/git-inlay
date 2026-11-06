@@ -100,6 +100,50 @@ func TestWriteHostAndRemoveHost(t *testing.T) {
 	}
 }
 
+// A block whose end marker was deleted runs to the end of the file, so one
+// rewrite leaves the file current rather than nesting a second block.
+func TestSpliceOrphanBegin(t *testing.T) {
+	block := HostBlock([]manifest.Claim{{Path: "x"}})
+	orphan := "*.log\n" + HostBegin + "\n/old\n"
+	once := Splice([]byte(orphan), block)
+	if string(once) != "*.log\n"+block {
+		t.Fatalf("Splice = %q", once)
+	}
+	if twice := Splice(once, block); string(twice) != string(once) {
+		t.Fatalf("second Splice = %q, want %q", twice, once)
+	}
+	path := filepath.Join(t.TempDir(), "exclude")
+	if err := os.WriteFile(path, []byte(orphan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := HostCurrent(path, []manifest.Claim{{Path: "x"}}); err != nil || ok {
+		t.Fatalf("HostCurrent before WriteHost = %v, %v", ok, err)
+	}
+	if err := WriteHost(path, []manifest.Claim{{Path: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := HostCurrent(path, []manifest.Claim{{Path: "x"}}); err != nil || !ok {
+		t.Fatalf("HostCurrent after WriteHost = %v, %v", ok, err)
+	}
+}
+
+// A marker counts only as a whole line: a comment quoting one is user
+// content and stays.
+func TestMarkersMatchWholeLines(t *testing.T) {
+	quoted := "# git-inlay writes " + HostBegin + " here\n*.tmp\n"
+	if got := Strip([]byte(quoted)); string(got) != quoted {
+		t.Fatalf("Strip = %q", got)
+	}
+	block := HostBlock([]manifest.Claim{{Path: "x"}})
+	if got := Splice([]byte(quoted), block); string(got) != quoted+block {
+		t.Fatalf("Splice = %q", got)
+	}
+	crlf := "*.tmp\r\n" + HostBegin + "\r\n/old\r\n" + HostEnd + "\r\ntail\r\n"
+	if got := Strip([]byte(crlf)); string(got) != "*.tmp\r\ntail\r\n" {
+		t.Fatalf("Strip of a CRLF file = %q", got)
+	}
+}
+
 func TestEscape(t *testing.T) {
 	cases := map[string]string{
 		"plain":          "plain",

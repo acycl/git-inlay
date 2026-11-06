@@ -59,22 +59,46 @@ func HostBlock(claims []manifest.Claim) string {
 	return b.String()
 }
 
-// bounds locates the managed block in s: where the begin marker starts and
-// where the end marker's line finishes. ok is false when there is no block.
+// bounds locates the managed block in s: where the begin marker's line
+// starts and where the end marker's line finishes. A marker counts only
+// as a whole line, so a comment quoting one is left alone. A begin marker
+// whose end marker was deleted opens a block that runs to the end of s,
+// so one rewrite settles it. ok is false when there is no block.
 func bounds(s string) (begin, end int, ok bool) {
-	begin = strings.Index(s, HostBegin)
+	begin = lineIndex(s, HostBegin, 0)
 	if begin < 0 {
 		return 0, 0, false
 	}
-	n := strings.Index(s[begin:], HostEnd)
-	if n < 0 {
-		return 0, 0, false
+	end = lineIndex(s, HostEnd, begin+len(HostBegin))
+	if end < 0 {
+		return begin, len(s), true
 	}
-	end = begin + n + len(HostEnd)
+	end += len(HostEnd)
+	if end < len(s) && s[end] == '\r' {
+		end++
+	}
 	if end < len(s) && s[end] == '\n' {
 		end++
 	}
 	return begin, end, true
+}
+
+// lineIndex returns the offset of the first line of s, at or after from,
+// that is exactly marker, allowing a CRLF ending, or -1.
+func lineIndex(s, marker string, from int) int {
+	for from <= len(s) {
+		n := strings.Index(s[from:], marker)
+		if n < 0 {
+			return -1
+		}
+		at, end := from+n, from+n+len(marker)
+		if (at == 0 || s[at-1] == '\n') &&
+			(end == len(s) || s[end] == '\n' || strings.HasPrefix(s[end:], "\r\n")) {
+			return at
+		}
+		from = at + 1
+	}
+	return -1
 }
 
 // Splice returns content with the managed block replaced, or appended when
@@ -108,6 +132,21 @@ func WriteHost(path string, claims []manifest.Claim) error {
 		return err
 	}
 	return replace(path, existing, Splice(existing, HostBlock(claims)))
+}
+
+// HostCurrent reports whether the host exclude file at path already holds
+// what WriteHost would leave for claims, or with no claims what RemoveHost
+// would, so check can tell a stale block without writing.
+func HostCurrent(path string, claims []manifest.Claim) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	want := Strip(existing)
+	if len(claims) > 0 {
+		want = Splice(existing, HostBlock(claims))
+	}
+	return bytes.Equal(existing, want), nil
 }
 
 // RemoveHost drops the managed block from the host exclude file at path,

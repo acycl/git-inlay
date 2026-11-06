@@ -451,6 +451,36 @@ func TestWorktreeRelativePaths(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "prune", "--dry-run"), "wt/wt\tlocal\twould", "prune --dry-run after the worktree is deleted")
 }
 
+// check reads without writing: a stale managed block or inlay exclude is a
+// violation it reports and leaves for any other command to repair.
+func TestCheckReportsStaleExcludes(t *testing.T) {
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check")
+
+	block := f.read(".git/info/exclude")
+	edited := strings.Replace(block, "/.claude\n", "", 1)
+	f.write(".git/info/exclude", edited)
+	inlayExclude := ".git/inlays/main/claude/info/exclude"
+	f.write(inlayExclude, "/*\n")
+	errOut := f.inlayFails(f.root, 1, "check")
+	contains(t, errOut, "or has one that does not match the inlays' claims", "check with a stale block")
+	contains(t, errOut, "claude: has a missing or out-of-date info/exclude", "check with a stale inlay exclude")
+	if strings.Contains(errOut, "is not ignored by the host") {
+		t.Fatal("check judged I2 against a stale block")
+	}
+	contains(t, errOut, "fix: run a git inlay command other than check", "check with a stale block")
+	if f.read(".git/info/exclude") != edited || f.read(inlayExclude) != "/*\n" {
+		t.Fatal("check rewrote an exclude file")
+	}
+
+	f.inlayOK(f.root, "ls")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after ls")
+}
+
 // Scenario 8: with core.hooksPath set, install writes nothing in the hooks
 // directory. Git 2.54 and newer get config-defined hooks; older git gets
 // the snippet for the hook manager, and check can only warn.
