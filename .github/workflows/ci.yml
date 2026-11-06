@@ -17,8 +17,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: git --version
@@ -37,8 +37,8 @@ jobs:
   gofmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -49,6 +49,15 @@ jobs:
             exit 1
           fi
 
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          # Empty, or the action's default of "stable" outranks go.mod.
+          go-version-input: ""
+          go-version-file: go.mod
+
   oldest-git:
     name: oldest supported git
     # Pinned: the cached git binary is linked against this image's
@@ -56,22 +65,26 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GIT_VERSION: 2.40.1
+      # From kernel.org's signed sha256sums.asc; change with GIT_VERSION.
+      GIT_SHA256: 55511f10f3b1cdf5db4e0e3dea61819dfb67661b0507a5a2b061c70e4f87e14c
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: git-cache
         with:
           path: ~/git-${{ env.GIT_VERSION }}
-          key: git-${{ env.GIT_VERSION }}-ubuntu-24.04
+          key: git-${{ env.GIT_VERSION }}-${{ env.GIT_SHA256 }}-ubuntu-24.04
       - name: build git
         if: steps.git-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev zlib1g-dev libexpat1-dev
-          curl -fsSL "https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.gz" | tar -xz
+          curl -fsSLo "git-$GIT_VERSION.tar.gz" "https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.gz"
+          echo "$GIT_SHA256  git-$GIT_VERSION.tar.gz" | sha256sum -c -
+          tar -xzf "git-$GIT_VERSION.tar.gz"
           make -C "git-$GIT_VERSION" -j"$(nproc)" NO_TCLTK=1 NO_GETTEXT=1 NO_PERL=1 prefix="$HOME/git-$GIT_VERSION" install
       - name: use the built git
         run: echo "$HOME/git-$GIT_VERSION/bin" >> "$GITHUB_PATH"
@@ -82,14 +95,14 @@ jobs:
     name: goreleaser snapshot
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: build the release artifacts without publishing
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: "~> v2"

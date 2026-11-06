@@ -594,7 +594,13 @@ exercise a case-insensitive filesystem. No job uses the race detector: no
 production code starts a goroutine, and the end-to-end tests run in
 parallel against a binary built without it. The Linux job also rebuilds
 that binary for coverage (`GOCOVERDIR`, see `TestMain`) and prints the
-end-to-end coverage per package with `go tool covdata percent`. The Claude
+end-to-end coverage per package with `go tool covdata percent`. Every
+action is pinned to a commit SHA with its version in a trailing comment,
+which Dependabot keeps current; the oldest-git job checks the git tarball
+against kernel.org's published SHA-256 before building; a govulncheck job
+scans the module and the standard library it uses. The release workflow's
+attestation step needs the repository to be public, or on GitHub
+Enterprise Cloud. The Claude
 Code contract test skips on every runner, since none
 has the `claude` binary. Nothing has yet run on Windows; the first CI run
 is the first test of the hook shims and drive-letter paths there.
