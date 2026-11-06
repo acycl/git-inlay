@@ -1,3 +1,6 @@
+// Package gitx runs git as a subprocess with explicit repository locations
+// (PLAN.md section 7.1). The mechanics tests beside it pin down the git
+// behaviours the design depends on.
 package gitx
 
 import (
@@ -103,6 +106,22 @@ func (r Runner) Run(args ...string) error {
 func (r Runner) Output(args ...string) (string, error) {
 	out, err := r.capture(nil, args)
 	return strings.TrimRight(string(out), "\n"), err
+}
+
+// OutputWithInput is Output with the given bytes supplied on stdin.
+func (r Runner) OutputWithInput(input []byte, args ...string) (string, error) {
+	out, err := r.capture(input, args)
+	return strings.TrimRight(string(out), "\n"), err
+}
+
+// Lines runs git and returns the lines of its stdout, or nil when it
+// printed nothing.
+func (r Runner) Lines(args ...string) ([]string, error) {
+	out, err := r.Output(args...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
 }
 
 // OutputZ runs git and splits its NUL-separated stdout into entries.

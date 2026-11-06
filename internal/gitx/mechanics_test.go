@@ -380,3 +380,47 @@ func realPath(t *testing.T, path string) string {
 	}
 	return p
 }
+
+// TestCatFileBatchReportsMissing pins the cat-file --batch answers the
+// manifest reader relies on: an unborn HEAD, a commit without the file and
+// an unknown revision all say "missing" with exit status 0, while a present
+// file, reached through a branch or an annotated tag, comes back as a blob
+// header followed by its content and a newline.
+func TestCatFileBatchReportsMissing(t *testing.T) {
+	h := newHost(t)
+	catFile := func(dir, obj string) string {
+		t.Helper()
+		cmd := exec.Command("git", "-C", dir, "cat-file", "--batch")
+		cmd.Env = h.env
+		cmd.Stdin = strings.NewReader(obj + "\n")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("cat-file --batch %s: %v", obj, err)
+		}
+		return string(out)
+	}
+	const obj = "HEAD:.git-inlay/x.paths"
+
+	empty := filepath.Join(filepath.Dir(h.root), "empty")
+	h.git(t, "init", "-q", "-b", "main", empty)
+	if got := catFile(empty, obj); got != obj+" missing\n" {
+		t.Fatalf("unborn HEAD: %q", got)
+	}
+	if got := catFile(h.root, obj); got != obj+" missing\n" {
+		t.Fatalf("commit without the file: %q", got)
+	}
+	if got := catFile(h.root, "nosuchrev:x"); got != "nosuchrev:x missing\n" {
+		t.Fatalf("unknown revision: %q", got)
+	}
+
+	h.write(t, ".git-inlay/x.paths", "docs/\n")
+	h.git(t, "add", ".git-inlay")
+	h.git(t, "commit", "-q", "-m", "manifest")
+	h.git(t, "tag", "-a", "-m", "release", "v1")
+	for _, rev := range []string{"HEAD", "v1"} {
+		header, body, _ := strings.Cut(catFile(h.root, rev+":.git-inlay/x.paths"), "\n")
+		if f := strings.Fields(header); len(f) != 3 || f[1] != "blob" || body != "docs/\n\n" {
+			t.Fatalf("%s: header %q, body %q", rev, header, body)
+		}
+	}
+}
