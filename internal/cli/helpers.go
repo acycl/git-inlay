@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,17 +119,43 @@ func (s *session) stageable(in *inlay.Inlay, claims []manifest.Claim) ([]string,
 	return in.Git().OutputZ(args...)
 }
 
-// ignoreMatch reports the pattern that decides whether run's repository
-// ignores path: its source file and the pattern text, which starts with "!"
-// for a negation. ok is false when no pattern matches.
-func ignoreMatch(run gitx.Runner, path string) (src, pattern string, ok bool) {
-	// -z needs --stdin; the fields come back as source, line, pattern, path.
-	fields, err := run.OutputZWithInput([]byte(path+"\x00"),
-		"check-ignore", "-v", "-z", "--no-index", "--stdin")
-	if err != nil || len(fields) < 4 {
-		return "", "", false // exit 1: no pattern matched
+// ignoreRule is the pattern that decides whether a repository ignores a
+// path: its source file and the pattern text, which starts with "!" for a
+// negation.
+type ignoreRule struct{ src, pattern string }
+
+// ignoreRules returns the deciding pattern for each path that some
+// pattern of run's repository matches, negations included, in one
+// process. A path no pattern matches is absent from the result.
+func ignoreRules(run gitx.Runner, paths []string) map[string]ignoreRule {
+	out := map[string]ignoreRule{}
+	if len(paths) == 0 {
+		return out
 	}
-	return fields[0], fields[2], true
+	var input bytes.Buffer
+	for _, p := range paths {
+		input.WriteString(p)
+		input.WriteByte(0)
+	}
+	// -z needs --stdin; the fields come back as source, line, pattern,
+	// path for each path that matched.
+	fields, err := run.OutputZWithInput(input.Bytes(), "check-ignore", "-v", "-z", "--no-index", "--stdin")
+	var gerr *gitx.Error
+	switch {
+	case err == nil:
+		for i := 0; i+3 < len(fields); i += 4 {
+			out[fields[i+3]] = ignoreRule{src: fields[i], pattern: fields[i+2]}
+		}
+	case errors.As(err, &gerr) && gerr.ExitCode() == 1:
+		// No pattern matched any path.
+	case len(paths) > 1:
+		// A path beyond a symlink makes check-ignore refuse the whole
+		// batch, so ask one at a time to keep the answers for the rest.
+		for _, p := range paths {
+			maps.Copy(out, ignoreRules(run, []string{p}))
+		}
+	}
+	return out
 }
 
 // unexcluded returns the claims the host does not ignore even with the
@@ -168,14 +195,24 @@ func (s *session) unexcluded() ([]manifest.Claim, error) {
 // Tracked files are unaffected, but new files under such a claim never show
 // as untracked in the inlay and must be added with -f.
 func (s *session) warnIgnored(in *inlay.Inlay, claims []manifest.Claim) {
+	rules := ignoreRules(in.Git(), claimPaths(claims))
 	for _, cl := range claims {
-		src, pattern, ok := ignoreMatch(in.Git(), cl.Path)
-		if !ok || strings.HasPrefix(pattern, "!") || strings.HasSuffix(filepath.ToSlash(src), "info/exclude") {
+		r, ok := rules[cl.Path]
+		if !ok || strings.HasPrefix(r.pattern, "!") || strings.HasSuffix(filepath.ToSlash(r.src), "info/exclude") {
 			continue
 		}
 		s.c.warnf("%s is ignored by %s (pattern %s); inlay %s tracks it anyway, but new files under it will not show as untracked and must be added with: git inlay %s add -f <path>",
-			cl, src, pattern, in.Name, in.Name)
+			cl, r.src, r.pattern, in.Name, in.Name)
 	}
+}
+
+// claimPaths returns the paths of claims.
+func claimPaths(claims []manifest.Claim) []string {
+	out := make([]string, len(claims))
+	for i, cl := range claims {
+		out[i] = cl.Path
+	}
+	return out
 }
 
 // warnHistory tells the user when a claimed path exists anywhere in the
