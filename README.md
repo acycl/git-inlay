@@ -112,7 +112,7 @@ problem, naming the path, the owner, and the fix.
 | `claim <name> <path>...` | give paths to an inlay |
 | `unclaim <name> <path>...` | take paths back; the files stay on disk |
 | `ls [<name>] [--porcelain]` | list claims |
-| `which <path>... [--porcelain]` | report who owns each path: an inlay, `host`, or `none` |
+| `which <path>...` | report who owns each path: an inlay, `host`, or `none` |
 | `status [--fetch] [--porcelain]` | per inlay: branch, ahead/behind, changed and untracked counts |
 | `check [--staged]` | verify every invariant |
 | `restore [<name>]` | re-check out tracked inlay files missing from the tree |

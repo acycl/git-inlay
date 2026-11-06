@@ -255,16 +255,14 @@ func (c *cli) ls(args []string) error {
 
 // which reports who owns each path: an inlay, the host, or nobody.
 func (c *cli) which(args []string) error {
-	// --porcelain is accepted for symmetry; the output is already one
-	// path<TAB>owner line per argument.
+	// It prints one path<TAB>owner line per argument, fit for scripts.
 	fs := c.flagSet("which")
-	fs.Bool("porcelain", false, "machine-readable output")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) == 0 {
-		return usagef("usage: git inlay which <path>... [--porcelain]")
+		return usagef("usage: git inlay which <path>...")
 	}
 	s, err := c.open()
 	if err != nil {
