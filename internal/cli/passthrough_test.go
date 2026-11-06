@@ -7,6 +7,7 @@ import (
 )
 
 func TestTreeWide(t *testing.T) {
+	t.Parallel()
 	refused := []string{
 		"clean -fdx", "clean -xf", "clean -dxf", "clean -f -X", "clean -n -x",
 		"clean -fd -e !*", "clean -fd -e!*", "clean -fde !*", "clean -fd --exclude=!*", "clean -fd --exclude !*",
@@ -36,6 +37,7 @@ func TestTreeWide(t *testing.T) {
 }
 
 func TestGitArgs(t *testing.T) {
+	t.Parallel()
 	opts, pos := gitArgs(strings.Fields("push -q -mall -a --message=x --message y -- -a"), "m", "--message")
 	want := []gitOption{{"q", ""}, {"m", "all"}, {"a", ""}, {"--message", "x"}, {"--message", "y"}}
 	if len(opts) != len(want) {
@@ -52,6 +54,7 @@ func TestGitArgs(t *testing.T) {
 }
 
 func TestSplitAlias(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want []string

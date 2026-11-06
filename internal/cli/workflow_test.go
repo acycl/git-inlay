@@ -153,6 +153,7 @@ func (f *fixture) steady(dir, step string, snap map[string]string) {
 // other's: the host stages nothing private, the inlay shows nothing public,
 // and new files land with whoever owns their directory.
 func TestMonorepoInterleavedClaudeDir(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, warnings := f.dogfood()
@@ -258,6 +259,7 @@ func TestMonorepoInterleavedClaudeDir(t *testing.T) {
 // cherry-pick, amend, push, old tags and branches from before the agent
 // config existed, and a hard reset. None of it touches the inlays.
 func TestMonorepoDayOfHostOperations(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -322,6 +324,7 @@ func TestMonorepoDayOfHostOperations(t *testing.T) {
 // inlay's files from the tree; stash pop and the inlay's own checkout
 // bring them back.
 func TestMonorepoStashAndClean(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -393,6 +396,7 @@ func TestMonorepoStashAndClean(t *testing.T) {
 // check reports it, the fix the guards prescribe is pushable, and the
 // path's presence in history is flagged on later claims.
 func TestMonorepoUpstreamCommitsClaimedPath(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -435,6 +439,7 @@ func TestMonorepoUpstreamCommitsClaimedPath(t *testing.T) {
 // place, with nothing but private paths on the private remotes, and edits
 // flow between machines through the inlays alone.
 func TestMonorepoFreshCloneByTeammate(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -485,6 +490,7 @@ func TestMonorepoFreshCloneByTeammate(t *testing.T) {
 // through the common dir's exclude file and hooks; attach --all then brings
 // every inlay over, and prune cleans up once the worktree is gone.
 func TestMonorepoLinkedWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.monorepo()
 	snap, _ := f.dogfood()
@@ -524,6 +530,7 @@ func TestMonorepoLinkedWorktree(t *testing.T) {
 // hook that writes a marker proves the inlay-delivered settings were
 // loaded; --setting-sources user is the negative control.
 func TestClaudeCodeLoadsInlaySettings(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs the claude binary; skipped in short mode")
 	}
