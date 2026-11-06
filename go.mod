@@ -1,3 +1,3 @@
 module github.com/acycl/git-inlay
 
-go 1.27.3
+go 1.27
