@@ -318,6 +318,14 @@ func (h *Host) Rel(cwd, p string) (string, error) {
 	}
 	rel, err := filepath.Rel(h.Root, filepath.Join(parent, filepath.Base(abs)))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		// The root itself, reached through a symlink from outside it, is
+		// the root. filepath.Rel, not ==, since git spells Root with
+		// forward slashes on Windows.
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			if self, err := filepath.Rel(h.Root, r); err == nil && self == "." {
+				return ".", nil
+			}
+		}
 		return "", fmt.Errorf("%s is outside the repository", p)
 	}
 	return filepath.ToSlash(rel), nil
