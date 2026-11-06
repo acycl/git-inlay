@@ -482,7 +482,13 @@ without a process. It counts each inlay's commits on no remote (`rev-list HEAD -
 and its stash entries, which no push carries, removes the rest, and keeps
 those unless `--force`, printing the `git --git-dir=<dir> --work-tree=$C
 push` that clears each. There is no interactive confirmation. `check` reports a stale inlay, because its
-claims keep binding every worktree until it is pruned.
+claims keep binding every worktree until it is pruned. `prune` also
+removes the `.clone-*` staging directories that an interrupted `clone` or
+`attach` leaves under `$C/inlays/<key>/` (staging lives there so the final
+rename stays on one filesystem), reported as abandoned clones, except one
+with anything in it touched within the last day, which may belong to a
+clone still running; one that cannot be removed is reported and makes
+prune fail after it has done the rest.
 
 Git refuses to start against a repository whose `core.worktree` has a
 missing parent directory, so every runner for an inlay in another or a

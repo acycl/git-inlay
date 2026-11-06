@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/hooks"
@@ -208,8 +211,34 @@ func (c *cli) prune(args []string) error {
 			stale = append(stale, e)
 		}
 	}
-	if len(stale) == 0 {
+	clones, err := s.abandonedClones()
+	if err != nil {
+		return err
+	}
+	if len(stale) == 0 && len(clones) == 0 {
 		c.printf("nothing to prune\n")
+		return nil
+	}
+	// A clone that cannot be removed is reported, and prune carries on
+	// with the rest and the stale inlays before it fails.
+	failed := false
+	for _, dir := range clones {
+		key, err := filepath.Rel(s.host.InlaysDir(), filepath.Dir(dir))
+		if err != nil {
+			return err
+		}
+		action := "removed"
+		if *dryRun {
+			action = "would remove"
+		} else if err := os.RemoveAll(dir); err != nil {
+			action, failed = "not removed: "+err.Error(), true
+		}
+		c.printf("%s\t%s\t%s (abandoned clone)\n", filepath.ToSlash(key), filepath.Base(dir), action)
+	}
+	if len(stale) == 0 {
+		if failed {
+			return exitError{exitViolation}
+		}
 		return nil
 	}
 	var kept []inlay.Entry
@@ -265,6 +294,9 @@ func (c *cli) prune(args []string) error {
 		return err
 	}
 	if len(kept) == 0 {
+		if failed {
+			return exitError{exitViolation}
+		}
 		return nil
 	}
 	fmt.Fprintf(c.o.Stderr, "git-inlay: kept %d inlay(s) with work that exists nowhere else\n", len(kept))
@@ -290,6 +322,70 @@ func (c *cli) prune(args []string) error {
 	}
 	fmt.Fprintf(c.o.Stderr, "or remove them anyway with: git inlay prune --force\n")
 	return exitError{exitViolation}
+}
+
+// abandonedClones lists the staging directories an interrupted clone or
+// attach left under $C/inlays: stage names them .clone-*, which no verb
+// takes for an inlay, so nothing else would ever remove one. One with
+// anything in it touched within the last day may belong to a clone still
+// running, its fetch writing a pack or waiting at a credential prompt, so
+// it is left for a later prune.
+func (s *session) abandonedClones() ([]string, error) {
+	root := s.host.InlaysDir()
+	parents := []string{filepath.Join(root, "main")}
+	wts, err := os.ReadDir(filepath.Join(root, "wt"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, w := range wts {
+		if w.IsDir() {
+			parents = append(parents, filepath.Join(root, "wt", w.Name()))
+		}
+	}
+	var out []string
+	for _, p := range parents {
+		entries, err := os.ReadDir(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), ".clone-") {
+				continue
+			}
+			dir := filepath.Join(p, e.Name())
+			if time.Since(newest(dir)) >= 24*time.Hour {
+				out = append(out, dir)
+			}
+		}
+	}
+	return out, nil
+}
+
+// newest returns the latest modification time of anything under dir, dir
+// included. A walk error counts as now, so an unreadable directory is
+// never taken for abandoned.
+func newest(dir string) time.Time {
+	var latest time.Time
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	})
+	if err != nil {
+		return time.Now()
+	}
+	return latest
 }
 
 // stashes counts the inlay's stash entries, which no push carries.
