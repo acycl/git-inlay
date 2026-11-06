@@ -71,6 +71,7 @@ func (c *cli) init(args []string) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	s.warnUnexcluded() // the manifest is a claim too
 	c.printf("initialized inlay %s at %s\n", name, in.GitDir)
 	c.printf("next: git inlay claim %s <path>...\n", name)
 	s.hooksReminder()
@@ -151,6 +152,7 @@ func (c *cli) claim(args []string) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	s.warnUnexcluded()
 	for _, cl := range added {
 		c.printf("claimed %s for inlay %s\n", cl, name)
 	}
@@ -199,6 +201,7 @@ func (c *cli) unclaim(args []string) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	s.warnUnexcluded()
 	for _, r := range removed {
 		c.printf("unclaimed %s from inlay %s\n", strings.TrimPrefix(r, ":(literal)"), name)
 	}
@@ -267,13 +270,17 @@ func (c *cli) which(args []string) error {
 	if err != nil {
 		return err
 	}
+	x, err := s.guards()
+	if err != nil {
+		return err
+	}
 	for _, p := range pos {
 		rel, err := s.host.Rel(c.o.Dir, p)
 		if err != nil {
 			return err
 		}
 		owner := "none"
-		if o, ok := s.index.Owner(rel); ok {
+		if o, ok := x.Owner(rel); ok {
 			owner = o.Inlay
 		} else if tracked, err := s.host.Tracked(":(literal)" + rel); err != nil {
 			return err
@@ -300,15 +307,19 @@ func (c *cli) check(args []string) error {
 	if err != nil {
 		return err
 	}
+	x, err := s.guards()
+	if err != nil {
+		return err
+	}
 	var vs []guard.Violation
 	if *staged {
-		vs, err = guard.Staged(s.host, s.index)
+		vs, err = guard.Staged(s.host, x)
 		if err != nil {
 			return err
 		}
 	} else {
-		vs = append(vs, s.index.Overlaps(s.entries)...)
-		hv, err := guard.HostTracked(s.host, s.index)
+		vs = append(vs, x.Overlaps(s.entries)...)
+		hv, err := guard.HostTracked(s.host, x)
 		if err != nil {
 			return err
 		}
@@ -318,6 +329,16 @@ func (c *cli) check(args []string) error {
 			return err
 		}
 		for _, e := range s.mine() {
+			// The sync step repairs a moved checkout and the push guard,
+			// but trusts its stamp and so misses a change to the config
+			// that Configure did not make.
+			if ok, err := e.Inlay.Configured(); err != nil {
+				return err
+			} else if !ok {
+				vs = append(vs, guard.Violation{Path: e.Name, Inlay: e.Name,
+					Reason: "has a config that does not name this host, so its push guard may not run or may check the wrong host",
+					Fix:    "git inlay hooks install"})
+			}
 			cv, err := guard.Containment(e.Inlay, e.Manifest)
 			if err != nil {
 				return err
@@ -351,7 +372,7 @@ func (c *cli) check(args []string) error {
 		for _, cl := range missing {
 			v := guard.Violation{Path: cl.String(), Reason: "is not ignored by the host: a .gitignore pattern outranks the managed exclude block",
 				Fix: "remove the pattern that re-includes it from .gitignore"}
-			if o, ok := s.index.Owner(cl.Path); ok {
+			if o, ok := x.Owner(cl.Path); ok {
 				v.Inlay = o.Inlay
 				v.Fix += fmt.Sprintf("   or   git inlay unclaim %s %s", o.Inlay, cl)
 			}
@@ -430,6 +451,7 @@ func (c *cli) clone(args []string) error {
 	if err := s.refresh(); err != nil {
 		return err
 	}
+	s.warnUnexcluded()
 	c.printf("attached inlay %s from %s (branch %s, %d claims)\n", name, url, branch, len(m.Claims))
 	s.attached(in, m)
 	return nil

@@ -256,13 +256,23 @@ func (s *session) reload() error {
 	if err != nil {
 		return err
 	}
-	icase, err := s.host.IgnoreCase()
-	if err != nil {
-		return err
-	}
 	s.entries = entries
-	s.index = guard.NewIndex(entries, icase)
+	s.index = nil
 	return nil
+}
+
+// guards returns the index that matches host paths against claims. It is
+// built on first use: on a host with core.ignoreCase it folds case, and
+// only the verbs that match paths need that setting read.
+func (s *session) guards() (*guard.Index, error) {
+	if s.index == nil {
+		icase, err := s.host.IgnoreCase()
+		if err != nil {
+			return nil, err
+		}
+		s.index = guard.NewIndex(s.entries, icase)
+	}
+	return s.index, nil
 }
 
 // refresh rereads every manifest and regenerates the exclude files. With
@@ -274,7 +284,7 @@ func (s *session) refresh() error {
 	if len(s.entries) == 0 {
 		return exclude.RemoveHost(s.host.ExcludeFile())
 	}
-	if err := exclude.WriteHost(s.host.ExcludeFile(), s.index.Claims()); err != nil {
+	if err := exclude.WriteHost(s.host.ExcludeFile(), guard.Union(s.entries)); err != nil {
 		return err
 	}
 	for _, e := range s.mine() {
@@ -282,17 +292,21 @@ func (s *session) refresh() error {
 			return err
 		}
 		// The inlay's config holds absolute paths, so a moved checkout
-		// loses its push guard and its host; put them back on every command.
-		ok, err := e.Inlay.Configured()
-		if err != nil {
-			return err
-		}
-		if !ok {
+		// loses its push guard and its host; the stamp Configure leaves
+		// tells, without a process, when to put them back.
+		if !e.Inlay.Stamped() {
 			if err := e.Inlay.Configure(); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+// warnUnexcluded warns about claims the host does not ignore despite the
+// managed block, which the verbs that change claims call: that is where
+// the warning is actionable, and check reports the same as a violation.
+func (s *session) warnUnexcluded() {
 	missing, err := s.unexcluded()
 	if err != nil {
 		// A claim beyond a symlink makes check-ignore refuse the whole
@@ -303,7 +317,6 @@ func (s *session) refresh() error {
 	for _, cl := range missing {
 		s.c.warnf("the host does not ignore %s; a .gitignore pattern outranks the managed exclude block, so the host hooks are the only guard for it. Run: git inlay check", cl)
 	}
-	return nil
 }
 
 // mine returns the entries attached to the current worktree.
@@ -370,6 +383,10 @@ func (s *session) vet(name string, claims []manifest.Claim) error {
 	if len(claims) == 0 {
 		return nil
 	}
+	x, err := s.guards()
+	if err != nil {
+		return err
+	}
 	var probes, specs []string
 	for _, cl := range claims {
 		probes = append(append(probes, cl.Ancestors()...), cl.Path)
@@ -387,7 +404,7 @@ func (s *session) vet(name string, claims []manifest.Claim) error {
 	}
 	rules := ignoreRules(s.host.Git(), claimPaths(claims))
 	for _, cl := range claims {
-		if o, ok := s.index.Owner(cl.Path); ok && o.Inlay != name {
+		if o, ok := x.Owner(cl.Path); ok && o.Inlay != name {
 			return fmt.Errorf("%s is already owned by inlay %s through its claim %s", cl, o.Inlay, o.Claim)
 		}
 		for _, e := range s.entries {
@@ -395,7 +412,7 @@ func (s *session) vet(name string, claims []manifest.Claim) error {
 				continue
 			}
 			for _, other := range e.Manifest.Claims {
-				if s.index.Owns(cl, other.Path) {
+				if x.Owns(cl, other.Path) {
 					return fmt.Errorf("%s would contain %s, which inlay %s claims", cl, other, e.Name)
 				}
 			}
@@ -412,7 +429,7 @@ func (s *session) vet(name string, claims []manifest.Claim) error {
 		// names a file, so attribute hits as a directory claim would.
 		var hits []string
 		for _, p := range tracked {
-			if s.index.Owns(manifest.Claim{Path: cl.Path, Dir: true}, p) {
+			if x.Owns(manifest.Claim{Path: cl.Path, Dir: true}, p) {
 				hits = append(hits, p)
 			}
 		}
