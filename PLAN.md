@@ -217,7 +217,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
-| `git inlay version` | print version and the git version in use |
+| `git inlay version` (or `--version`) | print version and the git version in use |
 
 Every command except `version`, `check` and the `hook` family begins with a
 sync step: read the manifests of all attached inlays and regenerate the host managed
@@ -282,9 +282,9 @@ Guards:
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
 | hook presence | `check`; a warning from `init`, `clone`, `attach` | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
 
-The pre-push input is accepted in three forms: the stdin lines git provides, the
+The pre-push input is accepted in two forms: the stdin lines git provides, and the
 `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and `PRE_COMMIT_REMOTE_NAME`
-variables set by the pre-commit framework, and explicit `--from`/`--to` flags.
+variables set by the pre-commit framework.
 
 Remote comparison normalizes URLs before comparing: scp-like `git@host:a/b`,
 `ssh://git@host/a/b`, and `https://host/a/b` compare equal; a trailing `.git`
@@ -503,7 +503,7 @@ passes I3 and I4 against the real host.
 - Exit codes: 0 success, 1 invariant violation or guard refusal, 2 usage, 3
   git failure.
 - Human output on stdout, diagnostics on stderr, no color by default,
-  `--porcelain` on `ls`, `which`, and `status` for scripting.
+  `--porcelain` on `ls` and `status` for scripting.
 - Every refusal names the path, the owner, and the fix.
 
 ## 8. Testing

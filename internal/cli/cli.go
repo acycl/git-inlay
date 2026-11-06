@@ -59,14 +59,14 @@ live inside this repository's working tree.
   claim <name> <path>...                  give paths to an inlay
   unclaim <name> <path>...                take paths back from an inlay
   ls [<name>] [--porcelain]               list claims
-  which <path>... [--porcelain]           report who owns each path
+  which <path>...                         report who owns each path
   status [--fetch] [--porcelain]          short status of every inlay here
   check [--staged]                        verify every invariant
   restore [<name>]                        re-check out missing inlay files
   prune [--dry-run] [--force]             remove inlays whose worktree is gone
   hooks install|uninstall|status          manage the host's leak guards
   <name> <git command> [args]             run git against an inlay
-  version                                 print versions
+  version, --version                      print versions
 
 Inlay state lives under .git/inlays. Nothing is ever added to the host's
 commits: the host ignores every claimed path through .git/info/exclude.
@@ -165,7 +165,7 @@ func (c *cli) dispatch(args []string) error {
 		return c.hooks(rest)
 	case "hook":
 		return c.hook(rest)
-	case "version":
+	case "version", "--version":
 		return c.version()
 	}
 	if err := manifest.ValidName(verb); err != nil {

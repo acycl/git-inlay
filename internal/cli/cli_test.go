@@ -1207,7 +1207,7 @@ func TestDetach(t *testing.T) {
 }
 
 // status reports branch, upstream relation and tree state per inlay, with
-// --fetch for the remote's view; --porcelain on ls, which and status gives
+// --fetch for the remote's view; --porcelain on ls and status gives
 // stable tab-separated lines.
 func TestStatusAndPorcelain(t *testing.T) {
 	t.Parallel()
@@ -1253,8 +1253,12 @@ func TestStatusAndPorcelain(t *testing.T) {
 	if got := f.inlayOK(f.root, "ls"); got != "claude\t.claude/\nlocal\t(no claims)" {
 		t.Fatalf("ls = %q", got)
 	}
-	if got := f.inlayOK(f.root, "which", "--porcelain", ".claude/new.md", "README.md"); got != ".claude/new.md\tclaude\nREADME.md\thost" {
-		t.Fatalf("which --porcelain = %q", got)
+	if got := f.inlayOK(f.root, "which", ".claude/new.md", "README.md"); got != ".claude/new.md\tclaude\nREADME.md\thost" {
+		t.Fatalf("which = %q", got)
+	}
+	f.inlayFails(f.root, 2, "which", "--porcelain", "README.md")
+	if got, want := f.inlayOK(f.root, "--version"), f.inlayOK(f.root, "version"); got != want || !strings.Contains(got, "git") {
+		t.Fatalf("--version = %q, version = %q", got, want)
 	}
 }
 

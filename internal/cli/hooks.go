@@ -116,10 +116,7 @@ func (c *cli) hookPreCommit() error {
 
 // hookPrePush refuses a host push whose commits touch a claimed path.
 func (c *cli) hookPrePush(args []string) error {
-	fs := c.flagSet("pre-push")
-	from := fs.String("from", "", "remote object id, for manual use")
-	to := fs.String("to", "", "local object id, for manual use")
-	pos, err := parseArgs(fs, args)
+	pos, err := parseArgs(c.flagSet("pre-push"), args)
 	if err != nil {
 		return err
 	}
@@ -127,7 +124,7 @@ func (c *cli) hookPrePush(args []string) error {
 	if len(pos) > 0 {
 		remoteName = pos[0]
 	}
-	updates, err := c.refUpdates(*from, *to)
+	updates, err := c.refUpdates()
 	if err != nil {
 		return err
 	}
@@ -149,13 +146,10 @@ func (c *cli) hookPrePush(args []string) error {
 	return c.refuse("push", vs)
 }
 
-// refUpdates collects what is being pushed: from flags, from the
-// pre-commit framework's variables, or from git's stdin, in that order.
-func (c *cli) refUpdates(from, to string) ([]guard.RefUpdate, error) {
-	if to == "" {
-		to = c.env("PRE_COMMIT_TO_REF")
-		from = c.env("PRE_COMMIT_FROM_REF")
-	}
+// refUpdates collects what is being pushed: from the pre-commit
+// framework's variables when it set them, otherwise from git's stdin.
+func (c *cli) refUpdates() ([]guard.RefUpdate, error) {
+	to, from := c.env("PRE_COMMIT_TO_REF"), c.env("PRE_COMMIT_FROM_REF")
 	if to != "" {
 		if from == "" {
 			from = strings.Repeat("0", 40)
