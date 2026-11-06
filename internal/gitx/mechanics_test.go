@@ -537,3 +537,42 @@ func TestWorktreeGitdirFile(t *testing.T) {
 		h.git(t, "worktree", "prune")
 	}
 }
+
+// TestStatusPorcelainV2Branch pins the lines status reads from one
+// git status --porcelain=v2 --branch: the branch, "(detached)" without
+// one, the upstream and "+ahead -behind", one line per changed path and
+// "? " per untracked one. An upstream whose tracking ref is gone keeps
+// its branch.upstream line but loses branch.ab.
+func TestStatusPorcelainV2Branch(t *testing.T) {
+	h := newHost(t)
+	remote := filepath.Join(filepath.Dir(h.root), "remote.git")
+	h.git(t, "init", "-q", "--bare", "-b", "main", remote)
+	h.git(t, "remote", "add", "origin", remote)
+	h.git(t, "push", "-q", "-u", "origin", "main")
+	h.write(t, "b.txt", "b\n")
+	h.git(t, "add", "b.txt")
+	h.git(t, "commit", "-q", "-m", "b")
+	h.write(t, "README.md", "changed\n")
+	h.write(t, "c.txt", "c\n")
+
+	lines := strings.Split(h.git(t, "status", "--porcelain=v2", "--branch"), "\n")
+	for _, want := range []string{"# branch.head main", "# branch.upstream origin/main", "# branch.ab +1 -0", "? c.txt"} {
+		if !slices.Contains(lines, want) {
+			t.Fatalf("status lacks %q:\n%s", want, strings.Join(lines, "\n"))
+		}
+	}
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "1 .M ") && strings.HasSuffix(l, " README.md") }) {
+		t.Fatalf("status lacks the changed README.md:\n%s", strings.Join(lines, "\n"))
+	}
+
+	h.git(t, "update-ref", "-d", "refs/remotes/origin/main")
+	out := h.git(t, "status", "--porcelain=v2", "--branch")
+	if !strings.Contains(out, "# branch.upstream origin/main") || strings.Contains(out, "# branch.ab") {
+		t.Fatalf("status with a gone upstream:\n%s", out)
+	}
+
+	h.git(t, "checkout", "-q", "--detach")
+	if out := h.git(t, "status", "--porcelain=v2", "--branch"); !strings.Contains(out, "# branch.head (detached)") {
+		t.Fatalf("status when detached:\n%s", out)
+	}
+}
