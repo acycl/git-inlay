@@ -100,7 +100,7 @@ func body(sub string) []string {
 	}
 	fallback := ""
 	if bin := binary(); bin != "" {
-		fallback = " || bin=" + shellQuote(bin)
+		fallback = " || bin=" + ShellQuote(bin)
 	}
 	return []string{
 		"bin=$(command -v git-inlay)" + fallback,
@@ -119,8 +119,9 @@ func binary() string {
 	return filepath.ToSlash(exe)
 }
 
-// shellQuote wraps s in single quotes for sh.
-func shellQuote(s string) string {
+// ShellQuote wraps s in single quotes for sh, which also runs the
+// commands git starts through the shell, such as --upload-pack.
+func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 

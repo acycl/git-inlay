@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/gitx"
+	"github.com/acycl/git-inlay/internal/hooks"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
 )
@@ -94,8 +95,15 @@ func (s *session) attachOne(name string) error {
 	}
 	// Branches land in a scratch namespace so the checkout below can create
 	// the local branch from an unborn HEAD; remote-tracking refs and tags
-	// are copied as they are, minus the symbolic origin/HEAD.
-	if err := t.Run("fetch", "-q", e.GitDir,
+	// are copied as they are, minus the symbolic origin/HEAD. The sibling's
+	// core.worktree may name a worktree whose parent directory is gone,
+	// which makes git refuse to start in it at all, so upload-pack and the
+	// pack-objects it starts run with the work tree pointed at the common
+	// dir, as inlay.Elsewhere does. Only the environment outranks it: git
+	// reads core.worktree from the repository's own config file, so a -c
+	// would not.
+	uploadPack := "GIT_WORK_TREE=" + hooks.ShellQuote(filepath.ToSlash(s.host.CommonDir)) + " git upload-pack"
+	if err := t.Run("fetch", "-q", "--upload-pack="+uploadPack, e.GitDir,
 		"+refs/heads/*:refs/sibling/*", "+refs/remotes/*:refs/remotes/*",
 		"^refs/remotes/origin/HEAD", "+refs/tags/*:refs/tags/*"); err != nil {
 		cleanup()
