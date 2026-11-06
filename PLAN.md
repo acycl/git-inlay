@@ -301,13 +301,18 @@ What guards do not cover, and the documented answer:
 - `--no-verify` on both commit and push bypasses the hooks. The inlay
   pre-push guard and the remote check still apply to the inlay side.
 - `-c core.hooksPath=/dev/null`, which git 2.50 documents as the way to
-  skip hooks for one command, bypasses the shims in the hooks directory;
-  a config-defined guard still runs. That one is turned off by
+  skip hooks for one command, bypasses the shims in the hooks directory,
+  which is the whole host guard wherever `hooks install` placed a shim.
+  Where it configured a config-defined guard instead (beside a hook
+  manager or a foreign hook, on git 2.54 or newer), that guard still runs,
+  whatever `core.hooksPath` says. It is turned off by
   `hook.git-inlay-<hook>.enabled=false` from a scope read after the
-  repository config: `-c`, `GIT_CONFIG_*`, or `config.worktree`.
-  `hooks install` cannot outrank those and says so, and `hooks status`
-  and `check` report the guard `disabled` while it is set from a file.
-  Same class as `--no-verify`, with the same inlay-side guards left.
+  repository config: `-c`, `GIT_CONFIG_*`, or `config.worktree`, which
+  `hooks install` cannot outrank. `hooks install`, `hooks status` and
+  `check` report the guard `disabled` when they can see the setting: in
+  `config.worktree`, or in their own environment; one given only to the
+  commit or push is invisible to them. Same class as `--no-verify`, with
+  the same inlay-side guards left.
 - A config-defined guard runs only under git 2.54 or newer. `hooks status`
   and `check` ask the `git` on `PATH`, so on a host whose hook manager
   owns `core.hooksPath` they report the guard `configured` even when a
@@ -377,13 +382,15 @@ Dependencies: the standard library only, at runtime and in tests. No go-git.
    host hooks are not installed.
 
 `clone` runs steps 1 to 3, then `git fetch origin`, reads the manifest from
-`origin/HEAD`, validates every claim against the host (I1) and against other
+`origin/<branch>` for the remote's default branch, validates every claim
+against the host (I1) and against other
 inlays, and then checks out with `git checkout` without `-f`, so git refuses
 to overwrite untracked host files at claimed paths. That refusal is surfaced
 with the paths and a hint to move them aside. The remote's default branch
 comes from a second round trip, `git ls-remote --symref origin HEAD` after
 the fetch, since with the git 2.40 floor `fetch` cannot be relied on to set
-`origin/HEAD`. Asking first and fetching only that branch would save the
+`origin/HEAD`; without an answer it falls back to `main`, or to the first
+branch fetched. Asking first and fetching only that branch would save the
 other branches' transfer; inlays are small, so the cost is accepted.
 
 `attach` is `clone` with the sibling inlay's git dir as the fetch source. The
