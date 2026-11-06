@@ -25,27 +25,26 @@ func (c *cli) hooks(args []string) error {
 	if err != nil {
 		return err
 	}
-	var statuses []hooks.Status
-	var hooksPath string
+	var r *hooks.Report
 	switch args[0] {
 	case "install":
-		statuses, hooksPath, err = hooks.Install(s.host)
+		r, err = hooks.Install(s.host)
 		for _, e := range s.mine() {
 			if err == nil {
 				err = e.Inlay.Configure()
 			}
 		}
 	case "uninstall":
-		statuses, err = hooks.Uninstall(s.host)
+		r, err = hooks.Uninstall(s.host)
 	case "status":
-		statuses, hooksPath, err = hooks.Statuses(s.host)
+		r, err = hooks.Statuses(s.host)
 	default:
 		return usagef("usage: git inlay hooks install|uninstall|status")
 	}
 	if err != nil {
 		return err
 	}
-	for _, st := range statuses {
+	for _, st := range r.Statuses {
 		c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
 	}
 	for _, e := range s.mine() {
@@ -59,11 +58,20 @@ func (c *cli) hooks(args []string) error {
 		}
 		c.printf("%-11s %-10s %s\n", "inlay:"+e.Name, state, filepath.Join(e.Inlay.GitDir, "hooks", "pre-push"))
 	}
-	if hooksPath != "" {
-		c.printf("\ncore.hooksPath is %s, so %s", hooksPath, hooks.Snippet(hooks.Manager(s.host.Root)))
-	}
-	for _, st := range statuses {
-		if st.State == hooks.Foreign {
+	snippet := false
+	for _, st := range r.Statuses {
+		switch {
+		case args[0] == "uninstall":
+		case st.State == hooks.Disabled && args[0] == "install":
+			c.printf("\n%s.enabled is still false in config that git reads after the repository's, so git skips the %s guard; find the setting with:\n  git config --show-scope --show-origin --get-all %s.enabled\n", st.Path, st.Hook, st.Path)
+		case st.State == hooks.Disabled:
+			c.printf("\n%s.enabled is false, so git skips the %s guard; run: git inlay hooks install\n", st.Path, st.Hook)
+		case r.Fixable(st) && st.State != hooks.Absent:
+			c.printf("\n%s is not managed by git-inlay; run git inlay hooks install to add the guard beside it through git config\n", st.Path)
+		case st.State == hooks.Managed && !snippet:
+			snippet = true
+			c.printf("\ncore.hooksPath is %s, so %s", r.HooksPath, hooks.Snippet(hooks.Manager(s.host.Root)))
+		case st.State == hooks.Foreign:
 			c.printf("\n%s exists and is not managed by git-inlay; add to it:\n  git-inlay hook %s \"$@\"\n", st.Path, st.Hook)
 		}
 	}

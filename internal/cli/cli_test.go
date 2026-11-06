@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/acycl/git-inlay/internal/gitx"
 )
 
 var binDir string
@@ -232,6 +234,7 @@ func TestInitClaimCommit(t *testing.T) {
 	if got := f.git(f.root, "status", "--porcelain"); got != "" {
 		t.Fatalf("host status after new inlay file = %q", got)
 	}
+	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check")
 }
 
@@ -255,6 +258,7 @@ func TestClaimRefusals(t *testing.T) {
 	}
 	contains(t, f.inlayFails(f.root, 2, "init", "status"), "cannot name an inlay", "reserved name")
 	f.inlayFails(f.root, 2, "init", "Bad_Name")
+	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 1 claim(s)", "check")
 }
 
@@ -388,32 +392,183 @@ func TestLeakGuards(t *testing.T) {
 	}
 }
 
-// Scenario 8: with core.hooksPath set, install prints the snippet and writes nothing.
+// configHooks reports whether git runs config-defined hooks (git 2.54).
+func configHooks(t *testing.T) bool {
+	t.Helper()
+	ok, err := gitx.Runner{}.AtLeast(2, 54)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+// Scenario 8: with core.hooksPath set, install writes nothing in the hooks
+// directory. Git 2.54 and newer get config-defined hooks; older git gets
+// the snippet for the hook manager, and check can only warn.
 func TestHooksPathManaged(t *testing.T) {
 	f := newFixture(t)
 	f.git(f.root, "config", "core.hooksPath", ".husky")
 	if err := os.MkdirAll(filepath.Join(f.root, ".husky"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	f.inlayOK(f.root, "init", "claude")
 	out := f.inlayOK(f.root, "hooks", "install")
-	contains(t, out, "core.hooksPath", "install output")
-	contains(t, out, "husky manages", "install output")
 	if f.exists(".git/hooks/pre-commit") {
 		t.Fatal("install wrote a shim despite core.hooksPath")
 	}
+	if configHooks(t) {
+		contains(t, out, "pre-commit  configured hook.git-inlay-pre-commit", "install output")
+		contains(t, f.inlayOK(f.root, "hooks", "status"), "pre-push    configured", "status")
+		return
+	}
+	contains(t, out, "core.hooksPath", "install output")
+	contains(t, out, "husky manages", "install output")
 	contains(t, f.inlayOK(f.root, "hooks", "status"), "managed", "status")
+	_, errOut, _ := f.inlay(f.root, "check")
+	contains(t, errOut, "cannot verify that", "check under a hook manager")
 }
 
-// A hook that is not ours is left alone and the user is told what to add.
+// A hook that is not ours is left alone. Git 2.54 and newer get a
+// config-defined hook beside it; older git tells the user what to add.
 func TestForeignHookLeftAlone(t *testing.T) {
 	f := newFixture(t)
 	f.write(".git/hooks/pre-push", "#!/bin/sh\nexit 0\n")
 	out := f.inlayOK(f.root, "hooks", "install")
-	contains(t, out, "not managed by git-inlay", "install output")
+	if configHooks(t) {
+		contains(t, out, "pre-push    configured hook.git-inlay-pre-push", "install output")
+	} else {
+		contains(t, out, "not managed by git-inlay", "install output")
+	}
 	if f.read(".git/hooks/pre-push") != "#!/bin/sh\nexit 0\n" {
 		t.Fatal("foreign pre-push hook was modified")
 	}
 	contains(t, f.read(".git/hooks/pre-commit"), "hook pre-commit", "pre-commit shim")
+}
+
+// On git 2.54 and newer, hooks install guards a host whose hooks a manager
+// owns through config-defined hooks that run beside the manager's, and
+// check reports a guard that is missing or disabled.
+func TestConfigHooksBesideHookManager(t *testing.T) {
+	if !configHooks(t) {
+		t.Skip("config-defined hooks need git 2.54 or newer")
+	}
+	f := newFixture(t)
+	ran := filepath.ToSlash(filepath.Join(f.base, "ran"))
+	for name, body := range map[string]string{
+		"pre-commit": "#!/bin/sh\necho pre-commit >> '" + ran + "'\n",
+		"pre-push":   "#!/bin/sh\ncat >/dev/null\necho pre-push >> '" + ran + "'\n",
+	} {
+		p := filepath.Join(f.root, ".hooks", name)
+		writeFile(t, p, body)
+		if err := os.Chmod(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.git(f.root, "config", "core.hooksPath", ".hooks")
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	errOut := f.inlayFails(f.root, 1, "check")
+	contains(t, errOut, "host pre-commit hook: is managed", "check before install")
+	contains(t, errOut, "fix: git inlay hooks install", "check before install")
+
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-commit  configured hook.git-inlay-pre-commit", "install")
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-push    configured hook.git-inlay-pre-push", "second install")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after install")
+
+	f.write("CHANGELOG.md", "x\n")
+	f.git(f.root, "add", "CHANGELOG.md")
+	f.git(f.root, "commit", "-q", "-m", "clean")
+	f.git(f.root, "push", "-q", "origin", "main")
+	if got, err := os.ReadFile(ran); err != nil || string(got) != "pre-commit\npre-push\n" {
+		t.Fatalf("the hook manager's hooks ran %q, %v", got, err)
+	}
+
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak"), ".claude/settings.json: belongs to inlay claude", "pre-commit beside the manager")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	contains(t, f.gitFails(f.root, "push", "-q", "origin", "main"), ".claude/settings.json: belongs to inlay claude", "pre-push beside the manager")
+	f.git(f.root, "reset", "-q", "--hard", "origin/main")
+	f.inlayOK(f.root, "claude", "checkout", "--", ".")
+
+	// Git's own boolean rules decide, so "0k" is false too.
+	f.git(f.root, "config", "hook.git-inlay-pre-commit.enabled", "0k")
+	contains(t, f.inlayOK(f.root, "hooks", "status"), "pre-commit  disabled", "status of a disabled guard")
+	contains(t, f.inlayFails(f.root, 1, "check"), "host pre-commit hook: is disabled", "check with a disabled guard")
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after reinstall")
+
+	// The section's own enabled = true outranks a global enabled = false.
+	f.git(f.root, "config", "--global", "hook.git-inlay-pre-commit.enabled", "false")
+	contains(t, f.inlayOK(f.root, "hooks", "status"), "pre-commit  configured", "status under a global enabled = false")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak"), ".claude/settings.json: belongs to inlay claude", "pre-commit under a global enabled = false")
+	f.git(f.root, "reset", "-q")
+	f.git(f.root, "config", "--global", "--unset", "hook.git-inlay-pre-commit.enabled")
+
+	// An include later in the file outranks the section, so install writes
+	// it afresh after the include.
+	inc := filepath.Join(f.base, "team.inc")
+	writeFile(t, inc, "[hook \"git-inlay-pre-commit\"]\n\tenabled = false\n")
+	f.git(f.root, "config", "include.path", filepath.ToSlash(inc))
+	contains(t, f.inlayFails(f.root, 1, "check"), "host pre-commit hook: is disabled", "check with a later include disabling the guard")
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-commit  configured", "install after a later include")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after install beside a later include")
+	f.git(f.root, "config", "--unset", "include.path")
+
+	// A value git cannot parse as a boolean counts as off rather than
+	// failing status, and install rewrites it.
+	f.git(f.root, "config", "hook.git-inlay-pre-commit.enabled", "nope")
+	contains(t, f.inlayOK(f.root, "hooks", "status"), "pre-commit  disabled", "status with an unparseable enabled")
+	f.inlayOK(f.root, "hooks", "install")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after rewriting an unparseable enabled")
+
+	// What install cannot outrank, such as the environment's config, it
+	// reports as still off.
+	out, _, code := f.runWith(f.root, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=hook.git-inlay-pre-commit.enabled", "GIT_CONFIG_VALUE_0=false"},
+		"git", "inlay", "hooks", "install")
+	if code != 0 {
+		t.Fatalf("install under GIT_CONFIG_* exited %d", code)
+	}
+	contains(t, out, "pre-commit  disabled", "install under an environment enabled=false")
+	contains(t, out, "is still false", "install under an environment enabled=false")
+
+	// A hand-made section that would not run the guard does not count.
+	f.git(f.root, "config", "hook.git-inlay-pre-push.command", "bin=$(command -v git-inlay) || bin=x")
+	contains(t, f.inlayFails(f.root, 1, "check"), "host pre-push hook: is managed", "check with a truncated command")
+	f.inlayOK(f.root, "hooks", "install")
+
+	// With per-worktree config, another worktree may point core.hooksPath
+	// elsewhere and rely on the shared section, so a shim goes in beside it.
+	f.git(f.root, "config", "extensions.worktreeConfig", "true")
+	f.git(f.root, "config", "--unset", "core.hooksPath")
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-commit  installed", "install under extensions.worktreeConfig")
+	if _, _, code := f.run(f.root, "git", "config", "--get", "hook.git-inlay-pre-push.event"); code != 0 {
+		t.Fatal("install dropped the shared section under extensions.worktreeConfig")
+	}
+	f.git(f.root, "config", "--unset", "extensions.worktreeConfig")
+
+	// Otherwise, once the hooks directory is free again, the shim, which
+	// every git runs, replaces the config-defined hook rather than
+	// doubling it.
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-commit  installed", "install with the hooks directory free")
+	if _, _, code := f.run(f.root, "git", "config", "--get-regexp", `^hook\.git-inlay-`); code != 1 {
+		t.Fatal("install kept a git-inlay hook section beside the shim")
+	}
+	f.git(f.root, "config", "core.hooksPath", ".hooks")
+	f.inlayOK(f.root, "hooks", "install")
+
+	f.inlayOK(f.root, "hooks", "uninstall")
+	if _, _, code := f.run(f.root, "git", "config", "--get-regexp", `^hook\.git-inlay-`); code != 1 {
+		t.Fatal("uninstall left a git-inlay hook section in the config")
+	}
+	contains(t, f.inlayFails(f.root, 1, "check"), "host pre-push hook: is managed", "check after uninstall")
+	f.git(f.root, "config", "--unset", "core.hooksPath")
+	f.inlayOK(f.root, "hooks", "uninstall")
+	if f.exists(".git/hooks/pre-commit") {
+		t.Fatal("uninstall left the shim")
+	}
 }
 
 // Unclaim returns paths to the host's view without touching the files.
@@ -659,6 +814,7 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 	if _, _, code := f.run(f.root, "git", "check-ignore", "-q", "wt-only"); code != 0 {
 		t.Fatal("the main worktree does not ignore a path claimed in a linked worktree")
 	}
+	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check in main with a worktree claim")
 
 	// A stash in the worktree's copy is work too.
@@ -817,6 +973,7 @@ func TestDetach(t *testing.T) {
 	if strings.Contains(f.read(".git/info/exclude"), "/.claude\n") {
 		t.Fatal("the detached inlay's claim is still excluded")
 	}
+	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check after detach")
 
 	contains(t, f.inlayFails(f.root, 1, "detach", "local"), "has no remote", "detach of an inlay without a remote")
@@ -1108,6 +1265,7 @@ func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {
 		t.Fatalf("core.worktree after the move = %q, want %q", got, want)
 	}
 	f.inlayOK(moved, "claude", "push", "-q", "origin", "main")
+	f.inlayOK(moved, "hooks", "install")
 	contains(t, f.inlayOK(moved, "check"), "ok: 1 inlay(s)", "check after the move")
 }
 

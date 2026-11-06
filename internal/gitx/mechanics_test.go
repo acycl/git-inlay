@@ -424,3 +424,58 @@ func TestCatFileBatchReportsMissing(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigHookRunsDespiteHooksPath pins the config-defined hooks of git
+// 2.54 that hooks install falls back to under a hook manager: a hook
+// defined in the repository config runs although core.hooksPath points
+// elsewhere, its shell command gets the hook's arguments appended as "$@"
+// and the hook's stdin, its failure refuses the commit even though the
+// hook in core.hooksPath succeeds, and hook.<name>.enabled=false turns it
+// off.
+func TestConfigHookRunsDespiteHooksPath(t *testing.T) {
+	if ok, err := (Runner{}).AtLeast(2, 54); err != nil || !ok {
+		t.Skip("config-defined hooks need git 2.54 or newer")
+	}
+	h := newHost(t)
+	base := filepath.Dir(h.root)
+	remote := filepath.Join(base, "remote.git")
+	h.git(t, "init", "-q", "--bare", "-b", "main", remote)
+	h.git(t, "remote", "add", "origin", remote)
+
+	managed := filepath.Join(base, "managed")
+	writeFile(t, filepath.Join(managed, "pre-commit"), "#!/bin/sh\necho managed >> \"$0.ran\"\n")
+	if err := os.Chmod(filepath.Join(managed, "pre-commit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git(t, "config", "core.hooksPath", managed)
+	record := filepath.ToSlash(filepath.Join(base, "record"))
+	// The command ends without "$@", as hooks.Command does: git appends it.
+	h.git(t, "config", "hook.probe.command", `cat > '`+record+`.stdin'; printf '%s\n' "$#" > '`+record+`.args'; printf '%s\n' >> '`+record+`.args'`)
+	h.git(t, "config", "hook.probe.event", "pre-push")
+	h.git(t, "config", "hook.refuse.command", "exit 1")
+	h.git(t, "config", "hook.refuse.event", "pre-commit")
+
+	h.write(t, "a.txt", "a\n")
+	h.git(t, "add", "a.txt")
+	if _, err := h.run("commit", "-q", "-m", "a"); err == nil {
+		t.Fatal("a commit passed although a config-defined pre-commit hook failed")
+	}
+	h.git(t, "config", "hook.refuse.enabled", "false")
+	h.git(t, "commit", "-q", "-m", "a")
+	if _, err := os.Stat(filepath.Join(managed, "pre-commit.ran")); err != nil {
+		t.Fatal("the hook in core.hooksPath did not run beside the config-defined one")
+	}
+
+	h.git(t, "push", "-q", "origin", "main")
+	args, err := os.ReadFile(record + ".args")
+	if err != nil {
+		t.Fatal("the config-defined pre-push hook did not run despite core.hooksPath")
+	}
+	if got, want := string(args), "2\norigin\n"+remote+"\n"; filepath.ToSlash(got) != filepath.ToSlash(want) {
+		t.Fatalf("config-defined hook arguments = %q, want %q", got, want)
+	}
+	stdin, err := os.ReadFile(record + ".stdin")
+	if err != nil || !strings.HasPrefix(string(stdin), "refs/heads/main ") {
+		t.Fatalf("config-defined hook stdin = %q, %v", stdin, err)
+	}
+}
