@@ -372,7 +372,11 @@ Dependencies: the standard library only, at runtime and in tests. No go-git.
 `origin/HEAD`, validates every claim against the host (I1) and against other
 inlays, and then checks out with `git checkout` without `-f`, so git refuses
 to overwrite untracked host files at claimed paths. That refusal is surfaced
-with the paths and a hint to move them aside.
+with the paths and a hint to move them aside. The remote's default branch
+comes from a second round trip, `git ls-remote --symref origin HEAD` after
+the fetch, since with the git 2.40 floor `fetch` cannot be relied on to set
+`origin/HEAD`. Asking first and fetching only that branch would save the
+other branches' transfer; inlays are small, so the cost is accepted.
 
 `attach` is `clone` with the sibling inlay's git dir as the fetch source. The
 sibling's branches are fetched into a scratch `refs/sibling/` namespace, its
