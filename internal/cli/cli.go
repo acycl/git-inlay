@@ -303,6 +303,30 @@ func (s *session) refresh() error {
 	return nil
 }
 
+// staleExcludes reports exclude files that differ from what the sync step
+// would write, for check, which does not run it: the host's managed block,
+// whether it is stale, and each attached inlay's info/exclude.
+func (s *session) staleExcludes() (vs []guard.Violation, hostStale bool, err error) {
+	fix := "run a git inlay command other than check to regenerate it, for example git inlay ls, then check again"
+	current, err := exclude.HostCurrent(s.host.ExcludeFile(), guard.Union(s.entries))
+	if err != nil {
+		return nil, false, err
+	}
+	if !current {
+		vs = append(vs, guard.Violation{Path: s.host.ExcludeFile(),
+			Reason: "is missing the managed exclude block or has one that does not match the inlays' claims, so the host may track a claimed path or hide an unclaimed one",
+			Fix:    fix})
+	}
+	for _, e := range s.mine() {
+		if !e.Inlay.ExcludeCurrent(e.Manifest) {
+			vs = append(vs, guard.Violation{Path: e.Name, Inlay: e.Name,
+				Reason: "has a missing or out-of-date info/exclude, so the inlay may miss new files under its claims or show files outside them",
+				Fix:    fix})
+		}
+	}
+	return vs, !current, nil
+}
+
 // warnUnexcluded warns about claims the host does not ignore despite the
 // managed block, which the verbs that change claims call: that is where
 // the warning is actionable, and check reports the same as a violation.

@@ -265,9 +265,19 @@ func (i *Inlay) WriteManifest(m *manifest.Manifest) error {
 	return i.Git().Run("add", "-f", "--", manifest.File(i.Name))
 }
 
+// excludeFile is the inlay's info/exclude.
+func (i *Inlay) excludeFile() string { return filepath.Join(i.GitDir, "info", "exclude") }
+
+// ExcludeCurrent reports whether the inlay's info/exclude already holds
+// what WriteExclude would write for m.
+func (i *Inlay) ExcludeCurrent(m *manifest.Manifest) bool {
+	existing, err := os.ReadFile(i.excludeFile())
+	return err == nil && string(existing) == exclude.Inlay(m)
+}
+
 // WriteExclude regenerates the inlay's info/exclude from m.
 func (i *Inlay) WriteExclude(m *manifest.Manifest) error {
-	path := filepath.Join(i.GitDir, "info", "exclude")
+	path := i.excludeFile()
 	content := []byte(exclude.Inlay(m))
 	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, content) {
 		return nil

@@ -303,7 +303,9 @@ func (c *cli) check(args []string) error {
 	if len(pos) > 0 {
 		return usagef("usage: git inlay check [--staged]")
 	}
-	s, err := c.open()
+	// Read only: check reports what is on disk rather than repairing it
+	// first, and works on a read-only .git.
+	s, err := c.load()
 	if err != nil {
 		return err
 	}
@@ -329,9 +331,9 @@ func (c *cli) check(args []string) error {
 			return err
 		}
 		for _, e := range s.mine() {
-			// The sync step repairs a moved checkout and the push guard,
-			// but trusts its stamp and so misses a change to the config
-			// that Configure did not make.
+			// check skips the sync step that repairs a moved checkout or
+			// an upgraded push guard, and that step trusts its stamp in
+			// any case, so read the config itself.
 			if ok, err := e.Inlay.Configured(); err != nil {
 				return err
 			} else if !ok {
@@ -365,9 +367,18 @@ func (c *cli) check(args []string) error {
 		for _, w := range warnings {
 			c.warnf("%s", w)
 		}
-		missing, err := s.unexcluded()
+		stale, hostStale, err := s.staleExcludes()
 		if err != nil {
 			return err
+		}
+		vs = append(vs, stale...)
+		// Whether the host ignores each claim depends on the block, so
+		// that test waits until the block is current.
+		var missing []manifest.Claim
+		if !hostStale {
+			if missing, err = s.unexcluded(); err != nil {
+				return err
+			}
 		}
 		for _, cl := range missing {
 			v := guard.Violation{Path: cl.String(), Reason: "is not ignored by the host: a .gitignore pattern outranks the managed exclude block",
