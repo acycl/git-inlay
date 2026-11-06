@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -574,5 +575,28 @@ func TestStatusPorcelainV2Branch(t *testing.T) {
 	h.git(t, "checkout", "-q", "--detach")
 	if out := h.git(t, "status", "--porcelain=v2", "--branch"); !strings.Contains(out, "# branch.head (detached)") {
 		t.Fatalf("status when detached:\n%s", out)
+	}
+}
+
+// TestExcludeMatchesNonUTF8Bytes pins that git matches an exclude pattern
+// byte for byte, so a claim whose name is not valid UTF-8 (a Latin-1 name
+// on Linux) is ignored only if the pattern carries the same raw bytes.
+// macOS and Windows refuse such names.
+func TestExcludeMatchesNonUTF8Bytes(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip("the filesystem refuses names that are not valid UTF-8")
+	}
+	h := newHost(t)
+	name := "caf\xe9"
+	if err := os.WriteFile(filepath.Join(h.root, name), []byte("x\n"), 0o644); err != nil {
+		t.Skipf("the filesystem refuses %q: %v", name, err)
+	}
+	h.exclude(t, "/"+name+"\n")
+	if !h.ignored(t, name) {
+		t.Fatal("a pattern with the raw bytes does not ignore the file")
+	}
+	h.exclude(t, "/caf�\n")
+	if h.ignored(t, name) {
+		t.Fatal("a pattern with U+FFFD in place of the byte ignores the file")
 	}
 }

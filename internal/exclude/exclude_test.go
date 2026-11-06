@@ -149,6 +149,7 @@ func TestEscape(t *testing.T) {
 		"plain":          "plain",
 		"a#b!c*d?e[f\\g": "a\\#b\\!c\\*d\\?e\\[f\\\\g",
 		"trail ":         "trail\\ ",
+		"caf\xe9#":       "caf\xe9\\#", // Latin-1, not UTF-8: bytes pass through
 	}
 	for in, want := range cases {
 		if got := Escape(in); got != want {

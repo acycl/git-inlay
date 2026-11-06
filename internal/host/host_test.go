@@ -24,6 +24,10 @@ func TestFold(t *testing.T) {
 	if Fold("a/b") == Fold("a-b") {
 		t.Error("Fold merged different characters")
 	}
+	// Bytes that are not valid UTF-8 keep their identity.
+	if Fold("caf\xe9") == Fold("caf\xe8") || Fold("CAF\xe9") != "caf\xe9" {
+		t.Errorf("Fold of Latin-1 names: %q, %q", Fold("caf\xe9"), Fold("CAF\xe9"))
+	}
 }
 
 func TestASCII(t *testing.T) {
