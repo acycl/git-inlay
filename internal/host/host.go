@@ -9,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/acycl/git-inlay/internal/gitx"
 )
@@ -96,8 +98,8 @@ func (h *Host) SparseCheckout() (bool, error) {
 	return strings.EqualFold(v, "true"), err
 }
 
-// Tracked returns the host-tracked paths matching the pathspecs. On a
-// case-insensitive host, literal pathspecs match case-insensitively too.
+// Tracked returns the host-tracked paths matching the literal pathspecs.
+// On a case-insensitive host they match case-insensitively too.
 func (h *Host) Tracked(pathspecs ...string) ([]string, error) {
 	if len(pathspecs) == 0 {
 		return nil, nil
@@ -105,6 +107,9 @@ func (h *Host) Tracked(pathspecs ...string) ([]string, error) {
 	icase, err := h.IgnoreCase()
 	if err != nil {
 		return nil, err
+	}
+	if icase && !ascii(pathspecs) {
+		return h.trackedFolded(pathspecs)
 	}
 	specs := make([]string, len(pathspecs))
 	for i, p := range pathspecs {
@@ -116,15 +121,64 @@ func (h *Host) Tracked(pathspecs ...string) ([]string, error) {
 	return h.Git().OutputZ(append([]string{"ls-files", "-z", "--"}, specs...)...)
 }
 
+// trackedFolded answers Tracked by folding case itself. Git's icase magic
+// folds ASCII letters only, while the filesystem folds every letter, so
+// a host-tracked CAFÉ/x would slip past a pathspec for Café.
+func (h *Host) trackedFolded(pathspecs []string) ([]string, error) {
+	keys := make([]string, len(pathspecs))
+	for i, s := range pathspecs {
+		p, ok := strings.CutPrefix(s, ":(literal)")
+		if !ok {
+			return nil, fmt.Errorf("pathspec %q is not literal", s)
+		}
+		keys[i] = Fold(p)
+	}
+	all, err := h.Git().OutputZ("ls-files", "-z")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range all {
+		k := Fold(p)
+		for _, s := range keys {
+			if k == s || strings.HasPrefix(k, s+"/") {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// ascii reports whether every string is plain ASCII.
+func ascii(ss []string) bool {
+	for _, s := range ss {
+		for i := range len(s) {
+			if s[i] >= utf8.RuneSelf {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Fold maps p to a key shared by every case variant of p, for matching
+// paths on a host with core.ignoreCase. It folds every letter, round trip
+// through upper case included, so final sigma, long s and dotless i meet
+// their plain forms: a superset of what APFS and NTFS fold, so that a
+// guard errs towards refusing.
+func Fold(p string) string {
+	return strings.Map(func(r rune) rune { return unicode.ToLower(unicode.ToUpper(r)) }, p)
+}
+
 // IgnoreCase reports core.ignoreCase, which git sets at init on a
 // case-insensitive filesystem.
 func (h *Host) IgnoreCase() (bool, error) {
 	if h.ignoreCase == nil {
-		v, _, err := h.Git().Config("core.ignoreCase")
+		b, err := h.Git().Bool("core.ignoreCase")
 		if err != nil {
 			return false, err
 		}
-		b := strings.EqualFold(v, "true")
 		h.ignoreCase = &b
 	}
 	return *h.ignoreCase, nil

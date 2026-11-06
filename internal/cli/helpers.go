@@ -182,19 +182,31 @@ func (s *session) warnIgnored(in *inlay.Inlay, claims []manifest.Claim) {
 // host's history, since checking out such a commit in the host would
 // overwrite the inlay's files with the host's copy.
 func (s *session) warnHistory(claims []manifest.Claim) {
+	// On a case-insensitive host a commit with the path in any case
+	// would overwrite the inlay's files.
+	icase, err := s.host.IgnoreCase()
+	if err != nil {
+		return
+	}
+	spec := func(cl manifest.Claim) string {
+		if icase {
+			return ":(literal,icase)" + cl.Path
+		}
+		return cl.Pathspec()
+	}
 	if len(claims) > 1 {
 		// Each query walks the whole history when the path was never
 		// there, so settle the usual case of no hits with one walk.
 		args := []string{"rev-list", "--all", "-n", "1", "--"}
 		for _, cl := range claims {
-			args = append(args, cl.Pathspec())
+			args = append(args, spec(cl))
 		}
 		if out, err := s.host.Git().Output(args...); err != nil || out == "" {
 			return
 		}
 	}
 	for _, cl := range claims {
-		out, err := s.host.Git().Output("rev-list", "--all", "-n", "1", "--", cl.Pathspec())
+		out, err := s.host.Git().Output("rev-list", "--all", "-n", "1", "--", spec(cl))
 		if err == nil && len(out) >= 7 {
 			s.c.warnf("%s exists in the host's history (commit %s); checking out that commit in the host would overwrite the inlay's files", cl, out[:7])
 		}

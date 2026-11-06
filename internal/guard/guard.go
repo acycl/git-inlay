@@ -24,12 +24,18 @@ type Owner struct {
 }
 
 // Index resolves paths to owners across every inlay of the host.
-type Index struct{ owners []Owner }
+type Index struct {
+	owners []Owner
+	keys   []manifest.Claim // owners' claims as matched, lower-cased when folding
+	fold   bool
+}
 
 // NewIndex builds the union of claims across entries, including each
-// manifest's implicit claim on its own file.
-func NewIndex(entries []inlay.Entry) *Index {
-	x := &Index{}
+// manifest's implicit claim on its own file. With fold set, which a host
+// with core.ignoreCase needs, paths match claims whatever their case, as
+// git's own ignore and pathspec matching does there.
+func NewIndex(entries []inlay.Entry, fold bool) *Index {
+	x := &Index{fold: fold}
 	seen := map[Owner]bool{}
 	for _, e := range entries {
 		for _, c := range e.Manifest.All() {
@@ -41,14 +47,35 @@ func NewIndex(entries []inlay.Entry) *Index {
 		}
 	}
 	slices.SortFunc(x.owners, func(a, b Owner) int { return strings.Compare(a.Claim.Path, b.Claim.Path) })
+	x.keys = make([]manifest.Claim, len(x.owners))
+	for i, o := range x.owners {
+		x.keys[i] = x.claimKey(o.Claim)
+	}
 	return x
 }
 
+// key returns p as the index matches it.
+func (x *Index) key(p string) string {
+	if x.fold {
+		return host.Fold(p)
+	}
+	return p
+}
+
+// claimKey returns c as the index matches it.
+func (x *Index) claimKey(c manifest.Claim) manifest.Claim {
+	return manifest.Claim{Path: x.key(c.Path), Dir: c.Dir}
+}
+
+// Owns reports whether c owns p as the index matches paths.
+func (x *Index) Owns(c manifest.Claim, p string) bool { return x.claimKey(c).Owns(x.key(p)) }
+
 // Owner returns the owner of p, if any.
 func (x *Index) Owner(p string) (Owner, bool) {
-	for _, o := range x.owners {
-		if o.Claim.Owns(p) {
-			return o, true
+	k := x.key(p)
+	for i, c := range x.keys {
+		if c.Owns(k) {
+			return x.owners[i], true
 		}
 	}
 	return Owner{}, false
@@ -79,8 +106,9 @@ func (v Violation) String() string {
 	return s
 }
 
-// Overlaps finds claims of different inlays that own each other (I1).
-func Overlaps(entries []inlay.Entry) []Violation {
+// Overlaps finds claims of different inlays that own each other (I1), as
+// the index matches paths.
+func (x *Index) Overlaps(entries []inlay.Entry) []Violation {
 	var out []Violation
 	for i, a := range entries {
 		for _, b := range entries[i+1:] {
@@ -89,7 +117,7 @@ func Overlaps(entries []inlay.Entry) []Violation {
 			}
 			for _, ca := range a.Manifest.Claims {
 				for _, cb := range b.Manifest.Claims {
-					if ca.Overlaps(cb) {
+					if x.claimKey(ca).Overlaps(x.claimKey(cb)) {
 						out = append(out, Violation{
 							Path:   ca.String(),
 							Inlay:  a.Name,
@@ -152,7 +180,7 @@ func claimed(x *Index, p string) (Violation, bool) {
 	if o, ok := x.Owner(p); ok {
 		return Violation{Path: p, Inlay: o.Inlay, Reason: "belongs to inlay " + o.Inlay}, true
 	}
-	if strings.HasPrefix(p, manifest.Dir+"/") {
+	if strings.HasPrefix(x.key(p), manifest.Dir+"/") {
 		return Violation{Path: p, Reason: "is inside " + manifest.Dir + ", which is reserved for inlays"}, true
 	}
 	return Violation{}, false
