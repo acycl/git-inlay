@@ -78,10 +78,11 @@ func (c *cli) hooks(args []string) error {
 	return nil
 }
 
-// hook runs one of the guards on behalf of a hook shim.
+// hook runs one of the guards on behalf of a hook shim, or the briefing on
+// behalf of a coding agent's session-start hook.
 func (c *cli) hook(args []string) error {
 	if len(args) == 0 {
-		return usagef("usage: git inlay hook pre-commit|pre-push|inlay-pre-push [args]")
+		return usagef("usage: git inlay hook pre-commit|pre-push|inlay-pre-push|session-start [args]")
 	}
 	switch args[0] {
 	case "pre-commit":
@@ -90,6 +91,11 @@ func (c *cli) hook(args []string) error {
 		return c.hookPrePush(args[1:])
 	case "inlay-pre-push":
 		return c.hookInlayPrePush(args[1:])
+	case "session-start":
+		if len(args) > 1 {
+			return usagef("usage: git inlay hook session-start")
+		}
+		return c.hookSessionStart()
 	}
 	return usagef("unknown hook %q", args[0])
 }

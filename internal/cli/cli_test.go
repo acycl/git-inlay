@@ -1790,3 +1790,80 @@ func TestClaimNeedsEscaping(t *testing.T) {
 	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok: 1 inlay(s), 1 claim(s)", "check")
 }
+
+// The session-start briefing names this worktree's claims and how to record
+// them, mentions missing guards and inlays held only by other worktrees,
+// and says nothing where there is nothing to brief on.
+func TestSessionStartBriefing(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	plain := filepath.Join(f.base, "plain")
+	if err := os.Mkdir(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{plain, f.root} {
+		if got := f.inlayOK(dir, "hook", "session-start"); got != "" {
+			t.Fatalf("briefing in %s = %q, want nothing", dir, got)
+		}
+	}
+	f.inlayFails(f.root, 2, "hook", "session-start", "extra")
+
+	f.inlayOK(f.root, "init", "team")
+	f.write(".claude/settings.json", "{}\n")
+	f.write("CLAUDE.local.md", "notes\n")
+	f.inlayOK(f.root, "claim", "team", "CLAUDE.local.md", ".claude")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "claims") // attach checks out what is committed
+	f.inlayOK(f.root, "init", "empty")
+	sub := filepath.Join(f.root, "pkg")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := f.inlayOK(sub, "hook", "session-start")
+	contains(t, got, "  team: .claude/, CLAUDE.local.md\n", "briefing")
+	contains(t, got, "  empty: (no claims yet)\n", "briefing")
+	contains(t, got, "git inlay <name> commit", "briefing")
+	contains(t, got, "git inlay hooks install", "briefing without guards")
+
+	f.inlayOK(f.root, "hooks", "install")
+	if got := f.inlayOK(f.root, "hook", "session-start"); strings.Contains(got, "hooks install") {
+		t.Fatalf("briefing with guards installed still asks for them:\n%s", got)
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after the briefing = %q", got)
+	}
+
+	wt := filepath.Join(f.base, "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	got = f.inlayOK(wt, "hook", "session-start")
+	contains(t, got, "other worktrees of this repository hold inlays that this one does not (empty, team)", "briefing in a worktree without inlays")
+	// The pre-commit fix names the attach an inlay held elsewhere needs, and
+	// anchors the path at the root, so it works from a subdirectory too.
+	stray := filepath.Join(wt, "CLAUDE.local.md")
+	writeFile(t, stray, "stray\n")
+	f.git(wt, "add", "-f", "CLAUDE.local.md")
+	contains(t, f.gitFails(wt, "commit", "-q", "-m", "leak"),
+		`fix: git restore --staged -- ":(top,literal)CLAUDE.local.md"   then, to commit it to its inlay, move the file aside, run git inlay attach team`,
+		"pre-commit in a worktree without the inlay")
+	wtSub := filepath.Join(wt, "pkg")
+	if err := os.Mkdir(wtSub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git(wtSub, "restore", "--staged", "--", ":(top,literal)CLAUDE.local.md")
+	if got := f.git(wt, "diff", "--cached", "--name-only"); got != "" {
+		t.Fatalf("restore --staged from a subdirectory left %q staged", got)
+	}
+	if err := os.Rename(stray, stray+".aside"); err != nil {
+		t.Fatal(err)
+	}
+	f.inlayOK(wt, "attach", "team")
+	if err := os.Rename(stray+".aside", stray); err != nil {
+		t.Fatal(err)
+	}
+	f.inlayOK(wtSub, "team", "add", "--", ":(top,literal)CLAUDE.local.md")
+	if got := f.inlayOK(wt, "team", "diff", "--cached", "--name-only"); got != "CLAUDE.local.md" {
+		t.Fatalf("inlay add from a subdirectory staged %q", got)
+	}
+	got = f.inlayOK(wt, "hook", "session-start")
+	contains(t, got, "  team: .claude/, CLAUDE.local.md\n", "briefing after attach")
+	contains(t, got, "Other worktrees hold inlays that this one does not (empty)", "briefing after attach")
+}

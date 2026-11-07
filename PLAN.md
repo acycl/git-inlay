@@ -216,6 +216,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
 | `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
+| `git inlay hook session-start` | print a briefing on this worktree's inlays for a coding agent's session-start hook, or nothing where there are none (section 7.6) |
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` (or `--version`) | print version and the git version in use |
 
@@ -530,6 +531,25 @@ passes I3 and I4 against the real host.
   meant to record it somewhere. Its paths carry the `:(top,literal)`
   pathspec magic, so the commands work from any directory and a leading
   `!` or a glob character cannot widen them.
+
+### 7.6 Coding agents
+
+Claimed paths are invisible to the host's `git status`, `git diff` and
+`git add -A`, and to search that honours git's ignore rules, so a coding
+agent that is not told about the inlays edits files it cannot see in any
+diff and has no way to learn how to record them. A note in the host's
+`CLAUDE.md` cannot help: the host is public and usually unaware of
+git-inlay, and the claims differ per checkout.
+
+`git inlay hook session-start` prints a briefing for an agent's
+session-start hook, whose stdout the agent takes as context: each attached
+inlay's claims (up to 20 per inlay), how to inspect and commit them, the
+host operations that delete or stash them, inlays held only by other
+worktrees, and the host guards that are not active, if any. Outside a working
+tree, or on a host without inlays, it prints nothing and exits 0, so one
+user-level hook serves every project. Like the rest of the `hook` family
+it reads manifests and writes nothing, and it lives under `hook` rather
+than as a verb so that it reserves no inlay name.
 
 ## 8. Testing
 
