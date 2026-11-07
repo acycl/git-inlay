@@ -107,7 +107,7 @@ func (c *cli) hookPreCommit() error {
 	if err != nil {
 		return err
 	}
-	vs, err := guard.Staged(s.host, x)
+	vs, err := guard.Staged(s.host, x, s.attachedNames())
 	if err != nil {
 		return err
 	}

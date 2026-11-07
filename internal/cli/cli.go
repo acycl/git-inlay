@@ -354,6 +354,16 @@ func (s *session) mine() []inlay.Entry {
 	return out
 }
 
+// attachedNames returns the names of the inlays attached to the current
+// worktree.
+func (s *session) attachedNames() []string {
+	var names []string
+	for _, e := range s.mine() {
+		names = append(names, e.Name)
+	}
+	return names
+}
+
 // entry returns the named inlay attached to the current worktree.
 func (s *session) entry(name string) (inlay.Entry, error) {
 	for _, e := range s.entries {

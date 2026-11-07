@@ -313,7 +313,7 @@ func (c *cli) check(args []string) error {
 	}
 	var vs []guard.Violation
 	if *staged {
-		vs, err = guard.Staged(s.host, x)
+		vs, err = guard.Staged(s.host, x, s.attachedNames())
 		if err != nil {
 			return err
 		}

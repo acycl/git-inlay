@@ -523,7 +523,13 @@ passes I3 and I4 against the real host.
   git failure.
 - Human output on stdout, diagnostics on stderr, no color by default,
   `--porcelain` on `ls` and `status` for scripting.
-- Every refusal names the path, the owner, and the fix.
+- Every refusal names the path, the owner, and the fix. The pre-commit
+  refusal of a claimed path also names the inlay-side commit, or the
+  `attach` it needs first when the inlay is attached only in another
+  worktree, since whoever staged the path, a person or a coding agent,
+  meant to record it somewhere. Its paths carry the `:(top,literal)`
+  pathspec magic, so the commands work from any directory and a leading
+  `!` or a glob character cannot widen them.
 
 ## 8. Testing
 

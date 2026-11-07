@@ -171,18 +171,38 @@ func HostTracked(h *host.Host, x *Index) ([]Violation, error) {
 	return out, nil
 }
 
-// Staged finds staged host paths that belong to an inlay (pre-commit).
-func Staged(h *host.Host, x *Index) ([]Violation, error) {
+// Staged finds staged host paths that belong to an inlay (pre-commit). The
+// fix for a claimed path also names the inlay-side commit, since whoever
+// staged it, a person or a coding agent, most likely meant to record it
+// somewhere and would otherwise only learn where it may not go; for an
+// inlay not among those attached here, it names the attach that must come
+// first, which refuses to overwrite the file, so the file is moved aside
+// for it. Paths in the fix carry the top and literal pathspec magic, which
+// anchors them at the root, so the commands work from any directory of the
+// worktree, and keeps a leading "!" or a glob character from widening them.
+func Staged(h *host.Host, x *Index, attached []string) ([]Violation, error) {
 	staged, err := h.Staged()
 	if err != nil {
 		return nil, err
 	}
 	var out []Violation
 	for _, p := range staged {
-		if v, ok := claimed(x, p); ok {
-			v.Fix = fmt.Sprintf("git restore --staged -- %q", p)
-			out = append(out, v)
+		v, ok := claimed(x, p)
+		if !ok {
+			continue
 		}
+		spec := fmt.Sprintf("%q", ":(top,literal)"+p)
+		v.Fix = "git restore --staged -- " + spec
+		switch {
+		case v.Inlay == "":
+		case slices.Contains(attached, v.Inlay):
+			v.Fix += fmt.Sprintf("   then commit it to its inlay:   git inlay %s add -- %s && git inlay %s commit -m \"...\"",
+				v.Inlay, spec, v.Inlay)
+		default:
+			v.Fix += fmt.Sprintf("   then, to commit it to its inlay, move the file aside, run git inlay attach %s, and copy your changes back",
+				v.Inlay)
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }

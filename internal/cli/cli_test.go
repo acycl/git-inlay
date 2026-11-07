@@ -393,6 +393,7 @@ func TestLeakGuards(t *testing.T) {
 	f.git(f.root, "add", "-f", ".claude/settings.json")
 	errOut := f.gitFails(f.root, "commit", "-q", "-m", "leak")
 	contains(t, errOut, ".claude/settings.json: belongs to inlay claude", "pre-commit")
+	contains(t, errOut, `git inlay claude add -- ":(top,literal).claude/settings.json" && git inlay claude commit -m`, "pre-commit fix")
 
 	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
 	contains(t, f.gitFails(f.root, "push", "-q", "origin", "main"), ".claude/settings.json: belongs to inlay claude", "pre-push")
