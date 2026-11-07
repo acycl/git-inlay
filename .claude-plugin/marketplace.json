@@ -1,0 +1,14 @@
+{
+  "name": "git-inlay",
+  "description": "Claude Code integration for git-inlay",
+  "owner": {
+    "name": "acycl"
+  },
+  "plugins": [
+    {
+      "name": "git-inlay",
+      "source": "./plugins/git-inlay",
+      "description": "Tells Claude which files in a repository belong to git-inlay inlays, and how to commit them without leaking them into the host"
+    }
+  ]
+}

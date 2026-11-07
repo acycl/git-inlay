@@ -101,6 +101,45 @@ problem, naming the path, the owner, and the fix.
 | The checkout is moved or renamed | The next `git inlay` command other than `check`, which reports it, repairs the absolute paths in each inlay's config. |
 | The host's `.gitignore` already ignores a claimed path | The inlay tracks it anyway, but new files under it must be added with `-f`. `claim` warns. |
 
+## Claude Code
+
+Claimed files never show in the host's `git status` or `git diff`, and
+search tools that honour git's ignore rules may skip them, so a coding
+agent that is not told about the inlays cannot see its edits to them or
+know how to commit them. This repository is a Claude Code plugin
+marketplace whose `git-inlay` plugin tells it. Install it with:
+
+```
+/plugin install git-inlay --marketplace acycl/git-inlay
+```
+
+or, on Claude Code before 2.1.275, `/plugin marketplace add acycl/git-inlay`
+and then `/plugin install git-inlay@git-inlay`. The plugin needs
+`git-inlay` on `PATH`, at a version that has `hook session-start`. It adds:
+
+- a `SessionStart` hook that runs `git-inlay hook session-start`, which
+  lists this worktree's claims and how to record changes to them. Outside
+  a repository with inlays it prints nothing, so the plugin can stay
+  enabled for every project.
+- a `git-inlay` skill covering setup, guard refusals and recovery.
+
+A team inlay can enable the plugin for everyone who clones it, through
+the `.claude/settings.json` it delivers; Claude Code adds the marketplace
+once a person trusts the folder:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "git-inlay": { "source": { "source": "github", "repo": "acycl/git-inlay" } }
+  },
+  "enabledPlugins": { "git-inlay@git-inlay": true }
+}
+```
+
+Other agents with a session-start hook can run
+`git-inlay hook session-start` the same way: it reads nothing from stdin
+and prints the briefing on stdout.
+
 ## Commands
 
 | Command | Does |

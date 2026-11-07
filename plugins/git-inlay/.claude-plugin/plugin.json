@@ -1,0 +1,11 @@
+{
+  "name": "git-inlay",
+  "description": "Tells Claude which files in a repository belong to git-inlay inlays, and how to commit them without leaking them into the host",
+  "author": {
+    "name": "acycl"
+  },
+  "homepage": "https://github.com/acycl/git-inlay",
+  "repository": "https://github.com/acycl/git-inlay",
+  "license": "Apache-2.0",
+  "keywords": ["git", "private-files", "overlay", "settings"]
+}

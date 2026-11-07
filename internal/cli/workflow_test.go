@@ -531,16 +531,7 @@ func TestMonorepoLinkedWorktree(t *testing.T) {
 // loaded; --setting-sources user is the negative control.
 func TestClaudeCodeLoadsInlaySettings(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("runs the claude binary; skipped in short mode")
-	}
-	if runtime.GOOS == "windows" {
-		t.Skip("the marker hook is a POSIX shell command")
-	}
-	claudeBin, err := exec.LookPath("claude")
-	if err != nil {
-		t.Skip("claude is not on PATH")
-	}
+	claudeBin := claudeBinary(t)
 	f := newFixture(t)
 	f.monorepo()
 	marker := filepath.Join(f.base, "session-start.marker")
@@ -563,39 +554,137 @@ func TestClaudeCodeLoadsInlaySettings(t *testing.T) {
 		t.Fatal("the host does not ignore the settings file")
 	}
 
-	cfg := filepath.Join(f.base, "claude-config")
-	claude := func(args ...string) {
-		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, claudeBin, append([]string{"--init-only"}, args...)...)
-		cmd.Dir = f.root
-		cmd.Env = append(slices.Clone(f.env), "CLAUDE_CONFIG_DIR="+cfg,
-			"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
-		if sh := os.Getenv("SHELL"); sh != "" {
-			cmd.Env = append(cmd.Env, "SHELL="+sh)
-		}
-		var errOut bytes.Buffer
-		cmd.Stderr = &errOut
-		cmd.WaitDelay = 10 * time.Second // a lingering child must not hold stderr past the timeout
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("claude --init-only %s: %v\n%s", strings.Join(args, " "), err, errOut.String())
-		}
-	}
-	claude()
+	f.claude(claudeBin, nil, "--init-only")
 	if b, err := os.ReadFile(marker); err != nil || strings.TrimSpace(string(b)) != "loaded" {
 		t.Fatalf("the SessionStart hook from the inlay's settings did not run: %q, %v", b, err)
 	}
 	if err := os.Remove(marker); err != nil {
 		t.Fatal(err)
 	}
-	claude("--setting-sources", "user")
+	f.claude(claudeBin, nil, "--init-only", "--setting-sources", "user")
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("the hook ran with project settings disabled, so the marker proves nothing")
 	}
 	if got := f.git(f.root, "status", "--porcelain"); got != "" {
 		t.Fatalf("host status after running claude = %q", got)
 	}
+}
+
+// The plugin this repository publishes briefs Claude Code at session start:
+// claude --init-only loads it through --plugin-dir and runs its
+// SessionStart hook, which must reach git-inlay in the project directory.
+// A shim in front of the binary keeps the briefing, which Claude Code would
+// otherwise take for itself. claude plugin validate checks the plugin and
+// marketplace manifests, which nothing else does.
+func TestClaudeCodeRunsPluginBriefing(t *testing.T) {
+	t.Parallel()
+	claudeBin := claudeBinary(t)
+	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.monorepo()
+	f.dogfood()
+	shims := filepath.Join(f.base, "shims")
+	briefing := filepath.Join(f.base, "briefing.txt")
+	shim := filepath.Join(shims, "git-inlay")
+	writeFile(t, shim, "#!/bin/sh\nexec '"+filepath.Join(binDir, "git-inlay")+"' \"$@\" > '"+briefing+"' 2>&1\n")
+	if err := os.Chmod(shim, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := "PATH=" + strings.Join([]string{shims, binDir, os.Getenv("PATH")}, string(os.PathListSeparator))
+	f.claude(claudeBin, []string{path}, "--init-only", "--plugin-dir", filepath.Join(repo, "plugins", "git-inlay"))
+	got := readAt(t, f.base, "briefing.txt")
+	contains(t, got, "  team: .claude/settings.json, .claude/skills/internal/, CLAUDE.local.md, packages/api/.claude/\n", "plugin briefing")
+	contains(t, got, "  research: docs/research/\n", "plugin briefing")
+	f.claude(claudeBin, nil, "plugin", "validate", repo)
+}
+
+// The plugin's SessionStart hook runs a command that this binary accepts
+// and that briefs on the host's inlays. Unlike the tests that need claude,
+// this runs on every CI runner, so the plugin and the binary cannot drift
+// apart unnoticed.
+func TestClaudePluginHookCommand(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile(filepath.Join("..", "..", "plugins", "git-inlay", "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	groups := cfg.Hooks["SessionStart"]
+	if len(cfg.Hooks) != 1 || len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		t.Fatalf("hooks.json should hold exactly one SessionStart hook:\n%s", b)
+	}
+	h := groups[0].Hooks[0]
+	args := strings.Fields(h.Command)
+	if h.Type != "command" || len(args) == 0 || args[0] != "git-inlay" {
+		t.Fatalf("the SessionStart hook does not run git-inlay: %+v", h)
+	}
+	f := newFixture(t)
+	f.monorepo()
+	f.dogfood()
+	bin := filepath.Join(binDir, "git-inlay")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	out, errOut, code := f.run(f.root, bin, args[1:]...)
+	if code != 0 {
+		t.Fatalf("%s: exit %d\n%s", h.Command, code, errOut)
+	}
+	contains(t, out, "  team: .claude/settings.json, .claude/skills/internal/, CLAUDE.local.md, packages/api/.claude/\n", "hook output")
+}
+
+// claudeBinary returns the path of the claude binary, or skips the test
+// where it cannot run: under -short, on Windows, where the hooks these
+// tests give it are POSIX shell commands, and where claude is not on PATH.
+func claudeBinary(t *testing.T) string {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("runs the claude binary; skipped in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the hooks these tests use are POSIX shell commands")
+	}
+	bin, err := exec.LookPath("claude")
+	if err != nil {
+		t.Skip("claude is not on PATH")
+	}
+	return bin
+}
+
+// claude runs the claude binary at bin in the host under an isolated
+// configuration directory, with extra environment appended, and returns its
+// stdout; a non-zero exit fails the test.
+func (f *fixture) claude(bin string, extra []string, args ...string) string {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = f.root
+	cmd.Env = append(slices.Clone(f.env), "CLAUDE_CONFIG_DIR="+filepath.Join(f.base, "claude-config"),
+		"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+	if sh := os.Getenv("SHELL"); sh != "" {
+		cmd.Env = append(cmd.Env, "SHELL="+sh)
+	}
+	cmd.Env = append(cmd.Env, extra...)
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	cmd.WaitDelay = 10 * time.Second // a lingering child must not hold stderr past the timeout
+	if err := cmd.Run(); err != nil {
+		f.t.Fatalf("claude %s: %v\n%s%s", strings.Join(args, " "), err, out.String(), errOut.String())
+	}
+	return out.String()
 }
 
 func readAt(t *testing.T, dir, rel string) string {

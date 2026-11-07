@@ -551,6 +551,18 @@ user-level hook serves every project. Like the rest of the `hook` family
 it reads manifests and writes nothing, and it lives under `hook` rather
 than as a verb so that it reserves no inlay name.
 
+The repository is also a Claude Code plugin marketplace
+(`.claude-plugin/marketplace.json`) with one plugin, `plugins/git-inlay`:
+a `SessionStart` hook that runs `git-inlay hook session-start` on every
+session source (startup, resume, clear, compact), so the briefing is
+current after a compaction, and a `git-inlay` skill with the procedures:
+setup, inspecting and recording changes, reading guard refusals,
+recovery. The plugin carries no `version`, so installs track the commit
+it was installed from; it depends on the binary only through
+`hook session-start`, which must stay compatible. A team inlay can enable
+the plugin for its members through `extraKnownMarketplaces` and
+`enabledPlugins` in the `.claude/settings.json` it delivers.
+
 ## 8. Testing
 
 Unit tests, table-driven, in each package:
@@ -629,9 +641,14 @@ Agent-config contract: `claude --init-only` under an isolated
 `CLAUDE_CONFIG_DIR` runs the project's `SessionStart` hooks without a
 conversation or credentials, so a hook that writes a marker proves Claude
 Code loaded the inlay-delivered, host-ignored `.claude/settings.json`;
-`--setting-sources user` is the negative control. The test skips on
-Windows (the marker hook is a shell command), when `claude` is not on
-PATH, or under `-short`. A full `claude -p` run with
+`--setting-sources user` is the negative control. A second test loads the
+plugin with `--plugin-dir` and a shim in front of `git-inlay` that keeps
+the briefing, proving the plugin's hook reaches the binary in the project
+directory, then runs `claude plugin validate` on the repository. Both
+skip on Windows (the hooks are shell commands), when `claude` is not on
+PATH, or under `-short`; a third test, which runs everywhere, reads the
+plugin's `hooks.json` and runs its command against a fixture, so the
+plugin and the binary cannot drift apart. A full `claude -p` run with
 pre-granted trust could also check `permissions.allow` and
 `CLAUDE.local.md` loading, but it costs a model call per run, so it stays
 a manual pre-release step.

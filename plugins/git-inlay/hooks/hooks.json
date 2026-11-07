@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git-inlay hook session-start",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
