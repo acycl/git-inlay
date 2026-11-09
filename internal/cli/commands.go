@@ -145,11 +145,10 @@ func (c *cli) claim(args []string) error {
 	if len(files) > 0 {
 		// -f because a host .gitignore may cover the claim; stageable has
 		// already applied the inlay's own rules and the global excludes.
-		specs := make([]string, len(files))
-		for i, f := range files {
-			specs[i] = ":(literal)" + f
-		}
-		if err := e.Inlay.Git().Run(append([]string{"add", "-f", "--"}, specs...)...); err != nil {
+		// The files go on stdin: a claimed directory may hold more than a
+		// command line carries, a few hundred on Windows.
+		if _, err := e.Inlay.Git().OutputZWithInput(literalSpecs(files),
+			"add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return err
 		}
 	}

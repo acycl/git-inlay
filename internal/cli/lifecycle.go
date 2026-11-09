@@ -51,12 +51,7 @@ func (c *cli) restore(args []string) error {
 		if len(missing) == 0 {
 			continue
 		}
-		var input strings.Builder
-		for _, p := range missing {
-			input.WriteString(":(literal)" + p)
-			input.WriteByte(0)
-		}
-		if _, err := e.Inlay.Git().OutputZWithInput([]byte(input.String()),
+		if _, err := e.Inlay.Git().OutputZWithInput(literalSpecs(missing),
 			"checkout", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return err
 		}
@@ -129,12 +124,19 @@ func (c *cli) detach(args []string) error {
 	var shared []string
 	if !*keep {
 		// A file the host also tracks (I3 broken by an upstream commit, say)
-		// is the host's to delete, not ours.
-		specs := make([]string, len(files))
-		for i, p := range files {
-			specs[i] = ":(literal)" + p
+		// is the host's to delete, not ours. The host is asked by claim, not
+		// by file, of which there may be more than a command line carries;
+		// only a file the inlay tracks outside its claims is named itself.
+		var specs []string
+		for _, cl := range e.Manifest.All() {
+			specs = append(specs, cl.Pathspec())
 		}
-		shared, err = s.host.Tracked(specs...)
+		for _, p := range files {
+			if _, ok := e.Manifest.Owner(p); !ok {
+				specs = append(specs, ":(literal)"+p)
+			}
+		}
+		hostTracked, err := s.host.Tracked(specs...)
 		if err != nil {
 			return err
 		}
@@ -158,11 +160,12 @@ func (c *cli) detach(args []string) error {
 			return p
 		}
 		hostOwned := map[string]bool{}
-		for _, p := range shared {
+		for _, p := range hostTracked {
 			hostOwned[key(p)] = true
 		}
 		for _, p := range files {
 			if hostOwned[key(p)] {
+				shared = append(shared, p)
 				continue
 			}
 			err := root.Remove(filepath.FromSlash(p))

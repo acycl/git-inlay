@@ -1487,6 +1487,29 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	}
 }
 
+// A claimed directory may hold more files than a command line carries, so
+// claim stages them through stdin and detach asks the host by claim.
+func TestClaimAndDetachLargeDirectory(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	// Enough literal pathspecs to pass the limit: 32 KiB on Windows, about
+	// 2 MiB elsewhere.
+	n := 25000
+	if runtime.GOOS == "windows" {
+		n = 1500
+	}
+	name := strings.Repeat("n", 90)
+	for i := range n {
+		f.write(fmt.Sprintf("notes/%s-%05d.md", name, i), "x\n")
+	}
+	contains(t, f.inlayOK(f.root, "claim", "claude", "notes"), fmt.Sprintf("staged %d file(s)", n), "claim output")
+	contains(t, f.inlayOK(f.root, "detach", "claude", "--force"), fmt.Sprintf("%d file(s) removed", n+1), "detach output")
+	if f.exists("notes") {
+		t.Fatal("detach left the claimed directory behind")
+	}
+}
+
 // Hook scripts under core.hooksPath that call the guards, as the husky and
 // lefthook snippets do, refuse leaks at commit and at push with git's
 // stdin forwarded.

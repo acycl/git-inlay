@@ -48,6 +48,18 @@ func canonicalCase(root, rel string) string {
 	return strings.Join(parts, "/")
 }
 
+// literalSpecs renders paths as NUL-terminated literal pathspecs, the
+// input of a git command run with --pathspec-from-file=- and
+// --pathspec-file-nul.
+func literalSpecs(paths []string) []byte {
+	var b bytes.Buffer
+	for _, p := range paths {
+		b.WriteString(":(literal)" + p)
+		b.WriteByte(0)
+	}
+	return b.Bytes()
+}
+
 // summarize renders a path list with at most five entries shown.
 func summarize(paths []string) string {
 	shown := paths
