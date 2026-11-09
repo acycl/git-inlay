@@ -398,6 +398,38 @@ func TestPassthroughOutlivesInterrupt(t *testing.T) {
 	}
 }
 
+// A teammate's commit that carries a path outside the inlay's claims is
+// written over the host's file by a pull, since git overwrites ignored
+// files silently. Passthrough says so once; check keeps reporting it.
+func TestPullOfPathOutsideClaimsWarns(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+
+	// The teammate, with no guard in the way, commits the host's README.
+	mate := filepath.Join(f.base, "mate")
+	f.git(f.base, "clone", "-q", private, mate)
+	writeFile(t, filepath.Join(mate, "README.md"), "# not the host's\n")
+	f.git(mate, "add", "README.md")
+	f.git(mate, "commit", "-q", "-m", "stray")
+	f.git(mate, "push", "-q", "origin", "main")
+
+	_, errOut, code := f.inlay(f.root, "claude", "pull", "-q")
+	if code != 0 {
+		t.Fatalf("pull: exit %d\n%s", code, errOut)
+	}
+	contains(t, errOut, "inlay claude now tracks 1 path(s) outside its claims", "pull warning")
+	contains(t, errOut, "README.md: tracked by inlay claude but not under any of its claims", "pull warning")
+	if got := f.git(f.root, "status", "--porcelain"); got != " M README.md" {
+		t.Fatalf("host status after the pull = %q", got)
+	}
+	if _, errOut, _ := f.inlay(f.root, "claude", "status", "--porcelain"); strings.Contains(errOut, "outside its claims") {
+		t.Fatalf("the warning repeated on the next command: %q", errOut)
+	}
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {

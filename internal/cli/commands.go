@@ -666,7 +666,8 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 // passthrough runs git against an inlay with the terminal attached, then
 // runs the sync step again: a pull, merge, checkout or reset can change a
 // manifest, and without it the host would show newly claimed files until
-// the next command. Claims that changed are vetted as check would.
+// the next command. Claims that changed are vetted as check would, and
+// paths the inlay has come to track outside its claims are reported.
 func (c *cli) passthrough(name string, args []string) error {
 	if len(args) == 0 {
 		return usagef("usage: git inlay %s <git command> [args]", name)
@@ -690,6 +691,7 @@ func (c *cli) passthrough(name string, args []string) error {
 			what, name, verb, e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
 	}
 	before := e.Manifest.Claims
+	tracked, listed := trackedPaths(e)
 	code, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
 	if err != nil {
 		return err
@@ -699,8 +701,13 @@ func (c *cli) passthrough(name string, args []string) error {
 	// since scripts read it (diff --quiet answers 1 for a difference).
 	syncErr := s.refresh()
 	if syncErr == nil {
-		if after, err := s.entry(name); err == nil && !slices.Equal(before, after.Manifest.Claims) {
-			s.warnChangedClaims(after)
+		if after, err := s.entry(name); err == nil {
+			if !slices.Equal(before, after.Manifest.Claims) {
+				s.warnChangedClaims(after)
+			}
+			if listed {
+				s.warnNewStrays(after, tracked)
+			}
 		}
 	}
 	if code != 0 {
@@ -713,6 +720,48 @@ func (c *cli) passthrough(name string, args []string) error {
 		return fmt.Errorf("git succeeded, but the exclude files were not brought up to date: %w", syncErr)
 	}
 	return nil
+}
+
+// trackedPaths returns the paths inlay e tracks, or ok false when they
+// cannot be listed.
+func trackedPaths(e inlay.Entry) (paths map[string]bool, ok bool) {
+	files, err := e.Inlay.Tracked()
+	if err != nil {
+		return nil, false
+	}
+	paths = make(map[string]bool, len(files))
+	for _, p := range files {
+		paths[p] = true
+	}
+	return paths, true
+}
+
+// warnNewStrays warns, after a passthrough command, about the paths
+// outside its claims (I3) that inlay e has come to track, before being
+// what it tracked when the command began. A pull or checkout of a commit
+// that carries such a path writes it into the tree, over the host's file
+// if there is one, since from the inlay's side every host file is an
+// ignored file and git overwrites those without a word; clone vets the
+// incoming tree for this, and nothing can before a pull, whose commits are
+// unknown until git has run. A path the inlay already tracked does not
+// repeat, nor does one a changed manifest has left outside the claims,
+// which no command wrote: check reports those.
+func (s *session) warnNewStrays(e inlay.Entry, before map[string]bool) {
+	vs, err := guard.Containment(e.Inlay, e.Manifest)
+	if err != nil {
+		return
+	}
+	vs = slices.DeleteFunc(vs, func(v guard.Violation) bool { return before[v.Path] })
+	if len(vs) == 0 {
+		return
+	}
+	s.c.warnf("inlay %s now tracks %d path(s) outside its claims; if this command wrote them into the tree, a host file at such a path was overwritten, and the host's git status shows it:", e.Name, len(vs))
+	for _, v := range vs[:min(len(vs), 10)] {
+		fmt.Fprintf(s.c.o.Stderr, "  %s\n", v)
+	}
+	if n := len(vs) - 10; n > 0 {
+		fmt.Fprintf(s.c.o.Stderr, "  and %d more; see them with: git inlay check\n", n)
+	}
 }
 
 // treeWide recognizes the passthrough forms that act on ignored files, and

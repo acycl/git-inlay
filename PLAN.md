@@ -255,7 +255,14 @@ does not ignore: nothing vetted a teammate's claim against this host on
 its way in, and none of that can be refused in advance, since the
 incoming claims are unknown until git has run. Other inlays' problems
 are left to `check`, so that one known problem does not repeat on every
-pull. The hook
+pull. Passthrough also lists the inlay's tracked paths outside its claims
+(I3) before and after git runs, one `git ls-files` each, and warns about
+those that are new: a pull or checkout of a commit that carries such a
+path writes it into the tree, over the host's file if one is there,
+because from the inlay's side every host file is ignored and git
+overwrites ignored files silently. `clone` and `attach` refuse such a
+tree before checkout; a pull cannot be vetted in advance, so the warning
+is what tells the user to look at the host's `git status`. The hook
 family and `check` read manifests but do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
 managed block, or an inlay's stale `info/exclude`) as a violation fixed
