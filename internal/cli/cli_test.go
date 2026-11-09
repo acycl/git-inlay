@@ -563,6 +563,17 @@ func TestCloneRefusesVerbName(t *testing.T) {
 	if f.exists("notes.md") {
 		t.Fatal("the refused clone checked out files")
 	}
+
+	// A name only held back for a later verb is refused to a new inlay,
+	// not to one that exists: passthrough still reaches it.
+	held := f.bare("sync-private")
+	f.git(src, "mv", ".git-inlay/status.paths", ".git-inlay/sync.paths")
+	f.git(src, "commit", "-q", "-m", "rename")
+	f.git(src, "push", "-q", held, "main")
+	f.inlayOK(f.root, "clone", held)
+	if got := f.inlayOK(f.root, "sync", "ls-files"); got != ".git-inlay/sync.paths\nnotes.md" {
+		t.Fatalf("passthrough to an inlay with a held name = %q", got)
+	}
 }
 
 // Scenario 10: passthrough runs git against the inlay and refuses bad names.

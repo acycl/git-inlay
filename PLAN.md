@@ -223,7 +223,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay hook post-checkout` | internal; what that hook calls |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay hook session-start` | print a briefing on this worktree's inlays for a coding agent's session-start hook, or nothing where there are none (section 7.6) |
-| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above, nor a name held back for a later one (`all`, `completion`, `doctor`, `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`, `sync`): `init`, `clone` and `attach` refuse both, since no passthrough could reach an inlay named after a verb, while an inlay that already has a held name keeps working; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
+| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above, nor a name held back for a later one (`all`, `completion`, `doctor`, `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`, `sync`): `init` refuses both, and `clone` and `attach` refuse an inlay named after a verb, which no passthrough could reach, while an inlay that already has a held name is cloned, attached and reached as before; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` (or `--version`) | print version and the git version in use |
 
 Every command except `version`, `check` and the `hook` family begins with a

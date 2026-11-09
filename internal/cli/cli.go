@@ -57,12 +57,15 @@ var held = map[string]bool{
 	"repair": true, "show": true, "sync": true,
 }
 
-// reservedName refuses a name that is, or may become, a verb.
-func reservedName(name string) error {
+// reservedName refuses a name that is a verb, which no passthrough could
+// reach, and for a new inlay also one that may become a verb. An inlay
+// that exists under a held name, made before the name was held, is still
+// cloned and attached.
+func reservedName(name string, isNew bool) error {
 	switch {
 	case implemented[name]:
 		return fmt.Errorf("%q is a git-inlay command and cannot name an inlay", name)
-	case held[name]:
+	case isNew && held[name]:
 		return fmt.Errorf("%q is reserved for a future git-inlay command and cannot name an inlay", name)
 	}
 	return nil

@@ -29,7 +29,7 @@ func (c *cli) init(args []string) error {
 		return usagef("usage: git inlay init <name> [--remote <url>] [--no-hooks]")
 	}
 	name := pos[0]
-	if err := reservedName(name); err != nil {
+	if err := reservedName(name, true); err != nil {
 		return usageError{err.Error()}
 	}
 	if err := manifest.ValidName(name); err != nil {
@@ -703,7 +703,7 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 		return "", err
 	}
 	// Attached under a verb's name, no passthrough command could reach it.
-	if err := reservedName(name); err != nil {
+	if err := reservedName(name, false); err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}
 	return name, nil
