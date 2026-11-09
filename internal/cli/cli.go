@@ -641,6 +641,8 @@ func (s *session) hookViolations() ([]guard.Violation, []string, error) {
 			continue
 		case st.State == hooks.Absent:
 			why = "is not installed"
+		case st.State == hooks.Inert:
+			why = "is not executable (" + st.Path + "), so git skips it"
 		case st.State == hooks.Disabled:
 			why = "is disabled by " + st.Path + ".enabled"
 		default:

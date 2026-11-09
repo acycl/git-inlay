@@ -65,6 +65,8 @@ func (c *cli) hooks(args []string) error {
 			c.printf("\n%s.enabled is still false in config that git reads after the repository's, so git skips the %s guard; find the setting with:\n  git config --show-scope --show-origin --get-all %s.enabled\n", st.Path, st.Hook, st.Path)
 		case st.State == hooks.Disabled:
 			c.printf("\n%s.enabled is false, so git skips the %s guard; run: git inlay hooks install\n", st.Path, st.Hook)
+		case st.State == hooks.Inert:
+			c.printf("\n%s is not executable, so git skips the %s guard; run: git inlay hooks install\n", st.Path, st.Hook)
 		case r.Fixable(st) && st.State != hooks.Absent:
 			c.printf("\n%s is not managed by git-inlay; run git inlay hooks install to add the guard beside it through git config\n", st.Path)
 		case st.State == hooks.Managed && !snippet:

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/atomicfile"
@@ -35,6 +36,7 @@ type State string
 // Hook states.
 const (
 	Installed  State = "installed"  // our shim in the hooks directory
+	Inert      State = "inert"      // our shim without its executable bit, which git skips
 	Configured State = "configured" // our hook.git-inlay-<hook> section in the host's config
 	Disabled   State = "disabled"   // that section with enabled = false
 	Managed    State = "managed"    // core.hooksPath is set, so a hook manager owns hooks
@@ -66,7 +68,7 @@ type Report struct {
 // git 2.54 only the user can wire the guard in there.
 func (r *Report) Fixable(s Status) bool {
 	switch s.State {
-	case Absent, Disabled:
+	case Absent, Disabled, Inert:
 		return true
 	case Managed, Foreign:
 		return r.Config
@@ -234,7 +236,7 @@ func Statuses(h *host.Host) (*Report, error) {
 		if hooksPath == "" {
 			file = state(s.Path)
 		}
-		if file == Absent || file == Installed {
+		if file == Absent || file == Installed || file == Inert {
 			s.slot = s.Path
 		}
 		switch {
@@ -261,10 +263,39 @@ func state(path string) State {
 		return Absent
 	case err != nil:
 		return Foreign
-	case strings.Contains(string(data), Begin):
-		return Installed
+	case !strings.Contains(string(data), Begin):
+		return Foreign
+	case !Runnable(path):
+		return Inert
 	}
-	return Foreign
+	return Installed
+}
+
+// Runnable reports whether git would run the hook file at path: on every
+// system but Windows, which has no such bit, it skips a hook that is not
+// executable, with no more than a hint.
+func Runnable(path string) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode()&0o111 != 0
+}
+
+// WriteShim writes the shim for sub at path, executable. An existing file
+// keeps its mode through an atomic replacement, so the bit is set again
+// after it: that is what repairs a shim that lost it.
+func WriteShim(path, sub string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := atomicfile.WriteFile(path, []byte(Shim(sub)), 0o755); err != nil {
+		return err
+	}
+	if Runnable(path) {
+		return nil
+	}
+	return os.Chmod(path, 0o755)
 }
 
 // Install puts a guard in place for every hook: a shim where the hooks
@@ -287,10 +318,7 @@ func Install(h *host.Host) (*Report, error) {
 	for _, s := range r.Statuses {
 		switch {
 		case s.slot != "":
-			if err := os.MkdirAll(filepath.Dir(s.slot), 0o755); err != nil {
-				return nil, err
-			}
-			if err := atomicfile.WriteFile(s.slot, []byte(Shim(s.Hook)), 0o755); err != nil {
+			if err := WriteShim(s.slot, s.Hook); err != nil {
 				return nil, err
 			}
 			if len(local[s.Hook]) > 0 {
@@ -366,7 +394,7 @@ func Uninstall(h *host.Host) (*Report, error) {
 		return nil, err
 	}
 	for i, s := range r.Statuses {
-		if s.State != Installed {
+		if s.State != Installed && s.State != Inert {
 			continue
 		}
 		if err := os.Remove(s.Path); err != nil {

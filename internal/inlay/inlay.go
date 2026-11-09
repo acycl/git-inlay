@@ -108,13 +108,20 @@ func (i *Inlay) Configure() error {
 			return err
 		}
 	}
-	if err := os.MkdirAll(i.hooksDir(), 0o755); err != nil {
-		return err
-	}
-	if err := atomicfile.WriteFile(filepath.Join(i.hooksDir(), "pre-push"), []byte(hooks.Shim("inlay-pre-push")), 0o755); err != nil {
+	if err := hooks.WriteShim(i.pushGuard(), "inlay-pre-push"); err != nil {
 		return err
 	}
 	return atomicfile.WriteFile(i.stampFile(), i.stamp(), 0o644)
+}
+
+// pushGuard is the inlay's pre-push hook file.
+func (i *Inlay) pushGuard() string { return filepath.Join(i.hooksDir(), "pre-push") }
+
+// guarded reports whether the push guard is the current shim and git
+// would run it.
+func (i *Inlay) guarded() bool {
+	shim, err := os.ReadFile(i.pushGuard())
+	return err == nil && string(shim) == hooks.Shim("inlay-pre-push") && hooks.Runnable(i.pushGuard())
 }
 
 // stampFile is where Configure records, inside the inlay git dir, the
@@ -139,11 +146,7 @@ func (i *Inlay) stamp() []byte {
 // Configured, at the cost of a process, does see.
 func (i *Inlay) Stamped() bool {
 	got, err := os.ReadFile(i.stampFile())
-	if err != nil || !bytes.Equal(got, i.stamp()) {
-		return false
-	}
-	shim, err := os.ReadFile(filepath.Join(i.hooksDir(), "pre-push"))
-	return err == nil && string(shim) == hooks.Shim("inlay-pre-push")
+	return err == nil && bytes.Equal(got, i.stamp()) && i.guarded()
 }
 
 // Configured reports whether the inlay's config still names this host and
@@ -169,11 +172,7 @@ func (i *Inlay) Configured() (bool, error) {
 			return false, nil
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(i.hooksDir(), "pre-push"))
-	if err != nil {
-		return false, nil
-	}
-	return string(data) == hooks.Shim("inlay-pre-push"), nil
+	return i.guarded(), nil
 }
 
 // Git returns a runner pinned to the inlay, running at the host root.

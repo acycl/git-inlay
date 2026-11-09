@@ -255,9 +255,9 @@ does not ignore: nothing vetted a teammate's claim against this host on
 its way in, and none of that can be refused in advance, since the
 incoming claims are unknown until git has run. Other inlays' problems
 are left to `check`, so that one known problem does not repeat on every
-pull. Passthrough also lists the inlay's tracked paths outside its claims
-(I3) before and after git runs, one `git ls-files` each, and warns about
-those that are new: a pull or checkout of a commit that carries such a
+pull. Passthrough also lists the inlay's tracked paths before and after git
+runs, one `git ls-files` each, and warns about those that are new and
+outside its claims (I3): a pull or checkout of a commit that carries such a
 path writes it into the tree, over the host's file if one is there,
 because from the inlay's side every host file is ignored and git
 overwrites ignored files silently. `clone` and `attach` refuse such a
@@ -457,7 +457,11 @@ orphaned inlay's history is recovered.
 - With `core.hooksPath` unset, in `git rev-parse --git-path hooks`: if the
   file is absent, write the shim; if it contains our marker, rewrite it.
   The shim is preferred because every git version runs it, including the
-  older git a GUI client may bundle.
+  older git a GUI client may bundle. Git skips a hook file that is not
+  executable, so a shim without the bit counts as `inert`, not installed:
+  `hooks status` and `check` report it and `hooks install` sets the bit
+  again. The same holds for each inlay's own pre-push shim, which the
+  sync step repairs. Windows has no such bit.
 - Where the shim cannot go, because `core.hooksPath` is set (a hook manager
   owns the hooks) or a hook without our marker exists, and git is 2.54 or
   newer: write a config-defined hook into the host's repository config.

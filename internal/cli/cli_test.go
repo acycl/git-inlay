@@ -430,6 +430,37 @@ func TestPullOfPathOutsideClaimsWarns(t *testing.T) {
 	}
 }
 
+// Git skips a hook that is not executable, so a shim that lost the bit is
+// no guard: status and check say so, and hooks install puts it back.
+func TestShimWithoutExecutableBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit")
+	}
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.inlayOK(f.root, "hooks", "install")
+	hostShim := filepath.Join(f.root, ".git", "hooks", "pre-commit")
+	inlayShim := filepath.Join(f.root, ".git", "inlays", "main", "claude", "hooks", "pre-push")
+	for _, p := range []string{hostShim, inlayShim} {
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errOut := f.inlayFails(f.root, 1, "check")
+	contains(t, errOut, "host pre-commit hook: is not executable", "check with an inert host shim")
+	contains(t, errOut, "claude: has a config that does not name this host", "check with an inert inlay shim")
+	contains(t, f.inlayOK(f.root, "hooks", "status"), "inert", "hooks status")
+
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "pre-commit  installed", "hooks install")
+	for _, p := range []string{hostShim, inlayShim} {
+		if fi, err := os.Stat(p); err != nil || fi.Mode()&0o111 == 0 {
+			t.Fatalf("%s is still not executable (%v)", p, err)
+		}
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after hooks install")
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {
