@@ -108,8 +108,9 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --snapshot --clean
-      - name: check an archive carries the binary and the license
+      - name: check an archive carries the binary, the license and the man page
         run: |
           tar -tzf dist/git-inlay_*_linux_amd64.tar.gz | tee "$RUNNER_TEMP/contents.txt"
           grep -qx git-inlay "$RUNNER_TEMP/contents.txt"
           grep -qx LICENSE "$RUNNER_TEMP/contents.txt"
+          grep -qx man/git-inlay.1 "$RUNNER_TEMP/contents.txt"

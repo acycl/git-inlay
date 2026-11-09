@@ -27,6 +27,12 @@ archives:
         formats:
           - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Listing files replaces the defaults, so the license is named too. The
+    # man page is what `git inlay --help` shows: git answers that itself.
+    files:
+      - LICENSE
+      - README.md
+      - man/git-inlay.1
 
 checksum:
   name_template: checksums.txt

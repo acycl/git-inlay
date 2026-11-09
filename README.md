@@ -22,6 +22,11 @@ later is required. Release archives
 carry a build provenance attestation; check one with
 `gh attestation verify <archive> --owner acycl`.
 
+`git inlay -h` prints a summary of the commands. `git inlay --help` is
+answered by git itself, which looks for a manual page: release archives
+carry one, `man/git-inlay.1`, to copy into a `man1` directory on your
+`MANPATH` (`/usr/local/share/man/man1`, say).
+
 The hooks that `git inlay hooks install` writes look for `git-inlay` on
 `PATH` first and fall back to the binary that installed them, so commits
 from a GUI client that does not see your shell's `PATH` are still guarded.
