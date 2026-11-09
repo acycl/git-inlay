@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
@@ -315,7 +316,10 @@ func (c *cli) inlayStatus(in *inlay.Inlay, fetch bool) (inlayState, error) {
 		// With the terminal attached, so credential prompts work.
 		cmd := g.Command("fetch", "-q")
 		cmd.Stdin, cmd.Stderr = c.o.Stdin, c.o.Stderr
-		if err := cmd.Run(); err != nil {
+		release := gitx.HoldSignals()
+		err := cmd.Run()
+		release()
+		if err != nil {
 			c.warnf("fetch for inlay %s failed; showing the last known state", in.Name)
 		}
 	}

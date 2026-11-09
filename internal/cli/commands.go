@@ -448,11 +448,17 @@ func (c *cli) clone(args []string) error {
 		cleanup()
 		return err
 	}
+	// With the terminal attached, so credential prompts work, and with its
+	// signals held, so an interrupted fetch still gets its staging
+	// directory removed.
 	fetch := t.Command("fetch", "-q", "origin")
 	fetch.Stdin, fetch.Stderr = c.o.Stdin, c.o.Stderr
-	if err := fetch.Run(); err != nil {
+	release := gitx.HoldSignals()
+	err = fetch.Run()
+	release()
+	if err != nil {
 		cleanup()
-		return fmt.Errorf("fetch from %s failed", url)
+		return &gitx.Error{Args: []string{"fetch", "-q", "origin"}, Err: fmt.Errorf("fetch from %s failed: %w", url, err)}
 	}
 	branch, err := defaultBranch(t)
 	if err != nil {

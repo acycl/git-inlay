@@ -10,9 +10,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Runner executes git against one repository with explicit locations.
@@ -223,9 +225,26 @@ func (r Runner) Succeeds(args ...string) (bool, error) {
 	return false, err
 }
 
+// HoldSignals makes the process outlive an interrupt or quit from the
+// terminal until release is called, for the time a git child owns the
+// terminal. The terminal signals the whole foreground group, so git gets
+// the signal too and decides what it means: it may be waiting on a pager
+// or an editor that handles the key itself, and dying first would hand
+// the terminal back to the shell while they still read from it. The
+// signals are caught, not ignored, because a child inherits an ignored
+// signal and git would then never see one.
+func HoldSignals() (release func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGQUIT)
+	return func() { signal.Stop(ch) }
+}
+
 // Passthrough runs git connected to the given streams and returns its exit
-// status. The user's locale is kept so messages read as they normally would.
+// status. The user's locale is kept so messages read as they normally would,
+// and terminal signals are left to git (see HoldSignals), so the caller
+// still runs when git has been interrupted.
 func (r Runner) Passthrough(stdin io.Reader, stdout, stderr io.Writer, args ...string) (int, error) {
+	defer HoldSignals()()
 	cmd := r.Command(args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	err := cmd.Run()

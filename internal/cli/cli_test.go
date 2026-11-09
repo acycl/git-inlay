@@ -371,6 +371,33 @@ func TestPushOfCommitsThatPredateTheClaim(t *testing.T) {
 	contains(t, errOut, `made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- ":(top,literal)CLAUDE.md"`, "pre-push fix")
 }
 
+// An interrupt from the terminal reaches git-inlay as well as git. It must
+// outlive it, leaving the decision to git, and still answer with git's
+// exit status.
+func TestPassthroughOutlivesInterrupt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Process.Signal cannot send an interrupt on Windows")
+	}
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	// A shell alias stands in for a git command that is still running; the
+	// interrupt goes to git-inlay alone.
+	cmd := exec.Command(filepath.Join(binDir, "git-inlay"), "claude", "-c", "alias.wait=!sleep 3; exit 7", "wait")
+	cmd.Dir, cmd.Env = f.root, f.env
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	var exitErr *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		t.Fatalf("passthrough after an interrupt: %v, want git's exit status 7", err)
+	}
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {

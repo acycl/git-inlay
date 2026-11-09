@@ -240,9 +240,15 @@ pulled claim's files as untracked until the next command. When git
 fails, its exit status wins and a failure of that second sync is only a
 warning; when git succeeds, a failed sync, such as one that meets a
 pulled manifest that does not parse, fails the command. An interrupt
-from the terminal reaches git-inlay as well as git and skips the second
-sync; the next command catches up, and the guards read the manifests
-themselves rather than rely on it. When the inlay's claims changed,
+or quit from the terminal reaches git-inlay as well as git, since the
+terminal signals the whole foreground group. While git runs, git-inlay
+catches both and carries on: git decides what the key means, and may be
+waiting on a pager or an editor that handles it itself, so dying first
+would hand the terminal back to the shell while they still read from
+it. The second sync therefore runs after an interrupted command too.
+The signals are caught, not ignored, since git would inherit an ignored
+signal. The fetch of `clone` and of `status --fetch` holds them the same
+way, so an interrupted clone removes its staging directory. When the inlay's claims changed,
 passthrough then warns, as `check` would report, about any of that
 inlay's claims that overlaps another inlay's or that the host tracks or
 does not ignore: nothing vetted a teammate's claim against this host on
