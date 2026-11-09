@@ -215,7 +215,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay unclaim <name> <path>...` | remove from manifest, `git rm --cached` in the inlay, regenerate; warn that the files are now visible to the host |
 | `git inlay ls [<name>]` | list claims, per inlay |
 | `git inlay which <path>...` | report the owner of each path: host, an inlay, or none |
-| `git inlay status [--fetch]` | short status of every inlay in this worktree, plus ahead/behind |
+| `git inlay status [<name>] [--fetch]` | short status of every inlay in this worktree, or of the one named, plus ahead/behind |
 | `git inlay check [--staged] [--fix]` | run every invariant from section 6; non-zero exit on any violation; `--fix` runs the sync step first, so what it repairs (stale exclude files, an inlay config that no longer names this host) is not reported |
 | `git inlay restore [<name>]` | re-check out tracked inlay files that are missing from the tree, for example after `git clean -x` |
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |

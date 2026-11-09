@@ -1121,6 +1121,7 @@ func TestUnclaim(t *testing.T) {
 	f.write(".claude/settings.json", "{}\n")
 	f.inlayOK(f.root, "claim", "claude", ".claude")
 	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	contains(t, f.inlayFails(f.root, 1, "unclaim", "claude", ".claude/settings.json"), `the claim .claude/ covers it and can only be given up whole: git inlay unclaim claude ".claude/"`, "unclaim beneath a claim")
 	contains(t, f.inlayOK(f.root, "unclaim", "claude", ".claude"), "unclaimed .claude from inlay claude", "unclaim output")
 	if got := f.git(f.root, "status", "--porcelain"); got != "?? .claude/" {
 		t.Fatalf("host status after unclaim = %q", got)
@@ -1263,6 +1264,9 @@ func TestClaimCaseInsensitive(t *testing.T) {
 	f.git(f.root, "add", "-f", "CAFÉ/a.md")
 	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
 	contains(t, f.inlayFails(f.root, 1, "check"), "CAFÉ/a.md: tracked by the host but claimed by inlay me", "check with a non-ASCII case variant")
+
+	// unclaim names a claim in any case, as claim does.
+	contains(t, f.inlayOK(f.root, "unclaim", "me", "cafÉ"), "unclaimed Café from inlay me", "unclaim with the wrong case")
 }
 
 // A host .gitignore that ignores dotfiles but re-includes a path cannot be
@@ -1635,6 +1639,10 @@ func TestStatusAndPorcelain(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "status"), "claude\tmain\tahead 1\tclean", "status before fetch")
 	contains(t, f.inlayOK(f.root, "status", "--fetch"), "claude\tmain\tahead 1, behind 1\tclean", "status after fetch")
 	contains(t, f.inlayOK(f.root, "status", "--porcelain"), "local\tmain\t\t0\t0\t0\t0", "porcelain status without a remote")
+	if got := f.inlayOK(f.root, "status", "local", "--porcelain"); got != "local\tmain\t\t0\t0\t0\t0" {
+		t.Fatalf("status of one inlay = %q", got)
+	}
+	contains(t, f.inlayFails(f.root, 1, "status", "nope"), "no inlay named", "status of an unknown inlay")
 
 	if got := f.inlayOK(f.root, "ls", "--porcelain"); got != "claude\t.claude/" {
 		t.Fatalf("ls --porcelain = %q", got)

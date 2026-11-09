@@ -172,6 +172,20 @@ func (r Runner) Config(key string) (string, bool, error) {
 	return out, true, nil
 }
 
+// Path returns a configuration value that names a file, as git expands
+// it ("~/", "~user/" and "%(prefix)/"), and whether it is set.
+func (r Runner) Path(key string) (string, bool, error) {
+	out, err := r.Output("config", "--type=path", "--get", key)
+	if err != nil {
+		var gerr *Error
+		if errors.As(err, &gerr) && gerr.ExitCode() == 1 {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return out, true, nil
+}
+
 // Bool returns a boolean configuration value as git parses it, false when
 // unset.
 func (r Runner) Bool(key string) (bool, error) {

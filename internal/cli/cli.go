@@ -83,7 +83,7 @@ live inside this repository's working tree.
   unclaim <name> <path>...                take paths back from an inlay
   ls [<name>] [--porcelain]               list claims
   which <path>...                         report who owns each path
-  status [--fetch] [--porcelain]          short status of every inlay here
+  status [<name>] [--fetch] [--porcelain] short status of the inlays here
   check [--staged] [--fix]                verify every invariant
   restore [<name>]                        re-check out missing inlay files
   prune [--dry-run] [--force]             remove inlays whose worktree is gone

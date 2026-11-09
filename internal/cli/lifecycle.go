@@ -265,7 +265,8 @@ func (st inlayState) tree() string {
 	return strings.Join(parts, ", ")
 }
 
-// status prints a short status of every inlay in this worktree.
+// status prints a short status of every inlay in this worktree, or of the
+// one named.
 func (c *cli) status(args []string) error {
 	fs := c.flagSet("status")
 	fetch := fs.Bool("fetch", false, "fetch each inlay's remote first")
@@ -274,14 +275,21 @@ func (c *cli) status(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(pos) > 0 {
-		return usagef("usage: git inlay status [--fetch] [--porcelain]")
+	if len(pos) > 1 {
+		return usagef("usage: git inlay status [<name>] [--fetch] [--porcelain]")
 	}
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
 	entries := s.mine()
+	if len(pos) == 1 {
+		e, err := s.entry(pos[0])
+		if err != nil {
+			return err
+		}
+		entries = []inlay.Entry{e}
+	}
 	if len(entries) == 0 && !*porcelain {
 		c.printf("no inlays are attached to this worktree\n")
 		return nil

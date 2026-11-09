@@ -10,6 +10,7 @@ import (
 
 	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/guard"
+	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
 	"github.com/acycl/git-inlay/internal/remote"
@@ -195,13 +196,29 @@ func (c *cli) unclaim(args []string) error {
 		return err
 	}
 	m := e.Manifest
+	icase, err := s.host.IgnoreCase()
+	if err != nil {
+		return err
+	}
 	var removed []string
 	for _, p := range paths {
 		rel, err := s.host.Rel(c.o.Dir, p)
 		if err != nil {
 			return err
 		}
+		if icase {
+			// As claim spells a path the way the disk does, a claim is
+			// named here in any case, even with its file gone.
+			for _, cl := range m.Claims {
+				if host.Fold(cl.Path) == host.Fold(strings.TrimSuffix(rel, "/")) {
+					rel = cl.Path
+				}
+			}
+		}
 		if !m.Remove(rel) {
+			if cl, ok := m.Owner(rel); ok && cl != m.Self() {
+				return fmt.Errorf("inlay %s has no claim at %s; the claim %s covers it and can only be given up whole: git inlay unclaim %s %q", name, rel, cl, name, cl.String())
+			}
 			return fmt.Errorf("inlay %s has no claim at %s", name, rel)
 		}
 		removed = append(removed, ":(literal)"+rel)
@@ -290,20 +307,34 @@ func (c *cli) which(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range pos {
-		rel, err := s.host.Rel(c.o.Dir, p)
-		if err != nil {
+	// The host is asked once for every path no inlay owns, not once each.
+	rels := make([]string, len(pos))
+	owners := make([]string, len(pos))
+	var specs []string
+	for i, p := range pos {
+		if rels[i], err = s.host.Rel(c.o.Dir, p); err != nil {
 			return err
 		}
-		owner := "none"
-		if o, ok := x.Owner(rel); ok {
-			owner = o.Inlay
-		} else if tracked, err := s.host.Tracked(":(literal)" + rel); err != nil {
-			return err
-		} else if len(tracked) > 0 {
-			owner = "host"
+		if o, ok := x.Owner(rels[i]); ok {
+			owners[i] = o.Inlay
+		} else {
+			specs = append(specs, ":(literal)"+rels[i])
 		}
-		c.printf("%s\t%s\n", p, owner)
+	}
+	tracked, err := s.host.Tracked(specs...)
+	if err != nil {
+		return err
+	}
+	for i, p := range pos {
+		if owners[i] == "" {
+			owners[i] = "none"
+			// A literal pathspec matches the path and what lies beneath it.
+			under := manifest.Claim{Path: rels[i], Dir: true}
+			if slices.ContainsFunc(tracked, func(t string) bool { return rels[i] == "." || x.Owns(under, t) }) {
+				owners[i] = "host"
+			}
+		}
+		c.printf("%s\t%s\n", p, owners[i])
 	}
 	return nil
 }

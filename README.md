@@ -155,7 +155,7 @@ and prints the briefing on stdout.
 | `unclaim <name> <path>...` | take paths back; the files stay on disk |
 | `ls [<name>] [--porcelain]` | list claims |
 | `which <path>...` | report who owns each path: an inlay, `host`, or `none` |
-| `status [--fetch] [--porcelain]` | per inlay: branch, ahead/behind, changed and untracked counts |
+| `status [<name>] [--fetch] [--porcelain]` | per inlay: branch, ahead/behind, changed and untracked counts |
 | `check [--staged] [--fix]` | verify every invariant; `--fix` first regenerates the exclude files and repairs the inlays' config |
 | `restore [<name>]` | re-check out tracked inlay files missing from the tree |
 | `prune [--dry-run] [--force]` | remove inlays whose worktree is gone |

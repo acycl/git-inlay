@@ -92,10 +92,8 @@ func (s *session) resolveURL(u string) string {
 // globalExcludes returns the user's global excludes file, if there is one.
 // Like git, a configured file that does not exist is silently skipped.
 func (s *session) globalExcludes() string {
-	if v, ok, _ := s.host.Git().Config("core.excludesFile"); ok && v != "" {
-		if rest, ok := strings.CutPrefix(v, "~/"); ok {
-			v = filepath.Join(s.c.homeDir(), rest)
-		}
+	// Git expands the value itself, "~user/" and "%(prefix)/" included.
+	if v, ok, _ := s.host.Git().Path("core.excludesFile"); ok && v != "" {
 		if _, err := os.Stat(v); err == nil {
 			return v
 		}
