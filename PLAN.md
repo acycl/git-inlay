@@ -315,6 +315,14 @@ git with `git ls-remote --get-url <remote>`.
 Every guard failure lists the offending paths, names the owning inlay, and
 prints the exact command that resolves it.
 
+One refusal is a false alarm the guard cannot tell from a leak: a host
+commit made while the host still tracked a path, pushed after the path
+moved into an inlay (`git rm --cached`, then `claim`). Pre-push sees
+paths, not intent, and the commit that replaces a host file with the
+inlay's content looks the same. The refusal therefore names the
+`git log -p` that shows what the commits carry and the one-off
+`--no-verify` push that is then safe.
+
 What guards do not cover, and the documented answer:
 
 - `git clean -x` and `git stash -a` in the host remove ignored files from the

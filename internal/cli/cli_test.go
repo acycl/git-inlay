@@ -349,6 +349,28 @@ func TestArgumentsAndHelp(t *testing.T) {
 	}
 }
 
+// Host commits made while the host still tracked a path, pushed after the
+// path moved into an inlay, cannot be told from a leak, so the refusal
+// says how to check them and get them out.
+func TestPushOfCommitsThatPredateTheClaim(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("CLAUDE.md", "one\n")
+	f.git(f.root, "add", "CLAUDE.md")
+	f.git(f.root, "commit", "-q", "-m", "add CLAUDE.md")
+	f.git(f.root, "push", "-q", "origin", "main")
+	f.write("CLAUDE.md", "two\n")
+	f.git(f.root, "commit", "-q", "-am", "edit CLAUDE.md")
+	f.git(f.root, "rm", "-q", "--cached", "CLAUDE.md")
+	f.git(f.root, "commit", "-q", "-m", "move CLAUDE.md to an inlay")
+	f.inlayOK(f.root, "init", "claude")
+	f.inlayOK(f.root, "claim", "claude", "CLAUDE.md")
+	f.inlayOK(f.root, "hooks", "install")
+	errOut := f.gitFails(f.root, "push", "-q", "origin", "main")
+	contains(t, errOut, "CLAUDE.md: belongs to inlay claude", "pre-push")
+	contains(t, errOut, `made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- ":(top,literal)CLAUDE.md"`, "pre-push fix")
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {

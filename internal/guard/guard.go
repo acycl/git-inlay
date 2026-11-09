@@ -396,7 +396,12 @@ func Outgoing(h *host.Host, x *Index, updates []RefUpdate, remoteName string) ([
 	var out []Violation
 	for _, p := range paths {
 		if v, ok := claimed(x, p); ok {
-			v.Fix = "remove the path from the unpushed commits, for example with git rebase -i, or unclaim it"
+			// A commit made while the host still tracked the path, before it
+			// moved into the inlay, reads the same as a leak: the guard sees
+			// paths, not intent. Say so, since only the user can tell.
+			v.Fix = "remove the path from the unpushed commits, for example with git rebase -i, or unclaim it\n" +
+				"    if those commits were made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- " +
+				fmt.Sprintf("%q", ":(top,literal)"+p) + " and then push once with --no-verify"
 			out = append(out, v)
 		}
 	}

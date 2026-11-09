@@ -103,7 +103,10 @@ it. Never get past a guard with `--no-verify` or `git add -f`.
   then commit it to the inlay as above.
 - `refusing to push: ... belongs to inlay <name>`: an unpushed host commit
   carries a claimed path. It has to come out of those commits, which
-  rewrites history; ask the user before doing it.
+  rewrites history; ask the user before doing it. The one exception is
+  for the user to judge, not you: commits made while the host still
+  tracked the path, before it moved into the inlay, hold nothing private,
+  and the refusal names the `git log -p` that shows what they carry.
 - `refusing to push inlay <name>`: the push targets one of the host's
   remotes, or the inlay tracks a path outside its claims.
 - `refusing to run git clean -x against inlay <name>` (or `-X`, or
