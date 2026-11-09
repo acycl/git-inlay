@@ -94,6 +94,7 @@ problem, naming the path, the owner, and the fix.
 
 | Situation | What happens |
 |---|---|
+| Getting teammates' changes | `git pull` in the host first, then `git inlay <name> pull` for each inlay; `git inlay status --fetch` shows which are behind. A pulled claim applies at once, and one that covers a path the host still tracks gets a warning with the fix. Pulled the other way round, git replaces the host's copy of a newly claimed file with the inlay's, and uncommitted host edits to it are lost. |
 | `git checkout`, `rebase`, `merge`, `stash`, `clean -fd`, `reset --hard` in the host | Nothing. Claimed paths are ignored, so the host leaves them alone. |
 | `git clean -fdx` or `git stash --all` in the host | Ignored files go too. `git inlay restore` brings them back; `stash pop` does as well. |
 | An upstream commit adds a file at a claimed path | Git overwrites the ignored file on checkout. `git inlay check` reports it; `git rm --cached` plus a commit fixes it, and `git inlay <name> checkout -- <path>` restores the inlay's copy. |
@@ -162,7 +163,7 @@ and prints the briefing on stdout.
 | `<name> <git command> [args]` | run git against an inlay |
 
 Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,
-3 git failed.
+3 git failed. `<name> <git command>` exits with git's own status.
 
 ## Limitations
 

@@ -20,7 +20,7 @@ against an inlay.
 |---|---|
 | `git inlay ls` | the claims of every inlay in this worktree |
 | `git inlay which <path>...` | the owner of each path: an inlay, `host`, or `none` |
-| `git inlay status` | each inlay's branch, ahead/behind, and changed and untracked counts |
+| `git inlay status [--fetch]` | each inlay's branch, ahead/behind, and changed and untracked counts; `--fetch` fetches first |
 | `git inlay <name> status`, `git inlay <name> diff` | an inlay's changes in detail |
 | `git inlay check` | every invariant; each problem comes with a `fix:` line |
 
@@ -50,6 +50,25 @@ Do not edit `.git-inlay/*.paths` or the managed block in
 
 If the host's `.gitignore` already ignores a claimed path, new files under
 it need `git inlay <name> add -f <path>`.
+
+## Getting updates
+
+The host and each inlay have separate histories; nothing pins one to the
+other. Pull the host first, then each inlay:
+
+```sh
+git pull
+git inlay status --fetch    # which inlays are behind
+git inlay team pull
+```
+
+The other order can lose work: when a teammate moves a host file into an
+inlay, pulling the inlay before the host's untracking commit makes git
+replace the host's copy with the inlay's, uncommitted host edits included.
+The pull then warns that `the claims of inlay <name> changed` and lists
+the paths out of place, each with a `fix:` line. That fix is a host commit
+(`git rm --cached`), which merges cleanly with the teammate's own; confirm
+it with the user first.
 
 ## Setting up
 
@@ -93,7 +112,7 @@ it. Never get past a guard with `--no-verify` or `git add -f`.
   plain `git inlay <name> stash` stay within the inlay's claims.
 
 Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,
-3 git failed.
+3 git failed. `git inlay <name> <git command>` exits with git's own status.
 
 ## Keeping the files
 
