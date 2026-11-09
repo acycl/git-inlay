@@ -17,14 +17,24 @@ import (
 
 // hooks manages the host's hook shims.
 func (c *cli) hooks(args []string) error {
-	if len(args) != 1 {
-		return usagef("usage: git inlay hooks install|uninstall|status")
+	const usage = "usage: git inlay hooks install [--auto-attach] | uninstall | status"
+	fs := c.flagSet("hooks")
+	autoAttach := fs.Bool("auto-attach", false, "also attach the inlays to every new worktree")
+	args, err := parseArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(args) != 1 || (*autoAttach && args[0] != "install") {
+		return usagef(usage)
 	}
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
-	var r *hooks.Report
+	// attach is the hook that attaches inlays to a new worktree, which
+	// only install --auto-attach puts in place; once there, install keeps
+	// it current and status shows it.
+	var r, attach *hooks.Report
 	switch args[0] {
 	case "install":
 		r, err = hooks.Install(s.host)
@@ -33,18 +43,36 @@ func (c *cli) hooks(args []string) error {
 				err = e.Inlay.Configure()
 			}
 		}
+		if err == nil {
+			attach, err = hooks.AttachStatus(s.host)
+		}
+		if err == nil && (*autoAttach || ourHook(attach.Statuses[0])) {
+			attach, err = hooks.InstallAttach(s.host)
+		}
 	case "uninstall":
 		r, err = hooks.Uninstall(s.host)
 	case "status":
-		r, err = hooks.Statuses(s.host)
+		if r, err = hooks.Statuses(s.host); err == nil {
+			attach, err = hooks.AttachStatus(s.host)
+		}
 	default:
-		return usagef("usage: git inlay hooks install|uninstall|status")
+		return usagef(usage)
 	}
 	if err != nil {
 		return err
 	}
 	for _, st := range r.Statuses {
 		c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
+	}
+	if attach != nil {
+		switch st := attach.Statuses[0]; {
+		case ourHook(st):
+			c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
+		case *autoAttach:
+			// Neither a shim nor, on this git, a config-defined hook fits.
+			c.printf("%-11s %-10s %s\n", st.Hook, st.State, st.Path)
+			defer c.printf("\nto attach inlays to new worktrees, add to the %s hook:\n  git-inlay hook %s \"$@\"\n", st.Hook, st.Hook)
+		}
 	}
 	for _, e := range s.mine() {
 		ok, err := e.Inlay.Configured()
@@ -79,13 +107,22 @@ func (c *cli) hooks(args []string) error {
 	return nil
 }
 
+// ourHook reports whether st is a hook git-inlay put in place, running or
+// not.
+func ourHook(st hooks.Status) bool {
+	return st.Active() || st.State == hooks.Inert || st.State == hooks.Disabled
+}
+
 // hook runs one of the guards on behalf of a hook shim, or the briefing on
 // behalf of a coding agent's session-start hook.
 func (c *cli) hook(args []string) error {
 	if len(args) == 0 {
-		return usagef("usage: git inlay hook pre-commit|pre-push|inlay-pre-push|session-start [args]")
+		return usagef("usage: git inlay hook pre-commit|pre-push|inlay-pre-push|post-checkout|session-start [args]")
 	}
 	switch args[0] {
+	case hooks.AttachHook:
+		c.hookPostCheckout(args[1:])
+		return nil
 	case "pre-commit":
 		return c.hookPreCommit()
 	case "pre-push":
@@ -99,6 +136,28 @@ func (c *cli) hook(args []string) error {
 		return c.hookSessionStart()
 	}
 	return usagef("unknown hook %q", args[0])
+}
+
+// hookPostCheckout attaches the repository's inlays to a worktree that git
+// worktree add has just created, so that their files are in place before
+// anything, a coding agent's session say, starts in it. Git runs
+// post-checkout there with the null id as the previous HEAD and the branch
+// flag set, which no later checkout in the worktree repeats. It does
+// nothing where an inlay is already attached or no other worktree has
+// one, and it never fails: its exit status would become the checkout's,
+// and attach --all remains the way to do the same by hand.
+func (c *cli) hookPostCheckout(args []string) {
+	if len(args) != 3 || !guard.IsZero(args[0]) || args[2] != "1" {
+		return
+	}
+	s, err := c.load()
+	if err != nil || len(s.mine()) > 0 || len(s.siblingNames()) == 0 {
+		return
+	}
+	if err := c.attach([]string{"--all"}); err != nil {
+		c.warnf("could not attach this repository's inlays to the new worktree: %v", err)
+		c.warnf("once that is resolved, run: git inlay attach --all")
+	}
 }
 
 // hookPreCommit refuses a host commit that stages a claimed path.

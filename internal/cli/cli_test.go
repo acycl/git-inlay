@@ -493,6 +493,48 @@ func TestInitInstallsFreeGuards(t *testing.T) {
 	}
 }
 
+// With hooks install --auto-attach, git worktree add leaves the inlays
+// attached in the new worktree, their files in place; without it nothing
+// is attached, and hooks uninstall takes the hook away again.
+func TestAutoAttachInNewWorktree(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	plain := filepath.Join(f.base, "wts", "plain")
+	f.git(f.root, "worktree", "add", "-q", plain, "-b", "plain")
+	if _, err := os.Stat(filepath.Join(plain, ".claude", "settings.json")); err == nil {
+		t.Fatal("a worktree got the inlay's files without --auto-attach")
+	}
+	if strings.Contains(f.inlayOK(f.root, "hooks", "status"), "post-checkout") {
+		t.Fatal("hooks status lists the attach hook before it is asked for")
+	}
+	f.inlayFails(f.root, 2, "hooks", "status", "--auto-attach")
+
+	contains(t, f.inlayOK(f.root, "hooks", "install", "--auto-attach"), "post-checkout installed", "hooks install --auto-attach")
+	contains(t, f.inlayOK(f.root, "hooks", "install"), "post-checkout installed", "a later hooks install")
+	wt := filepath.Join(f.base, "wts", "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	if got := readAt(t, wt, ".claude/settings.json"); got != "{}\n" {
+		t.Fatalf("settings in the new worktree = %q", got)
+	}
+	if got := f.inlayOK(wt, "ls"); got != "claude\t.claude/" {
+		t.Fatalf("ls in the new worktree = %q", got)
+	}
+	// A later checkout in the worktree attaches nothing again and is not
+	// disturbed.
+	f.git(wt, "checkout", "-q", "-b", "other")
+	contains(t, f.inlayOK(wt, "check"), "ok:", "check in the new worktree")
+
+	f.inlayOK(f.root, "hooks", "uninstall")
+	if f.exists(".git/hooks/post-checkout") {
+		t.Fatal("the attach hook survived uninstall")
+	}
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {

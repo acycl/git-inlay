@@ -16,7 +16,7 @@ repository's working tree, without committing them to that repository
 \fBgit inlay check\fR [\-\-staged] [\-\-fix]
 \fBgit inlay restore\fR [<name>]
 \fBgit inlay prune\fR [\-\-dry\-run] [\-\-force]
-\fBgit inlay hooks\fR (install | uninstall | status)
+\fBgit inlay hooks\fR (install [\-\-auto\-attach] | uninstall | status)
 \fBgit inlay\fR <name> <git command> [<args>...]
 \fBgit inlay version\fR
 .fi
@@ -87,7 +87,7 @@ left alone.
 Remove the inlays of worktrees that no longer exist. Those with commits
 on no remote, or with stashes, are kept unless \fB\-\-force\fR is given.
 .TP
-\fBhooks\fR (install | uninstall | status)
+\fBhooks\fR (install [\-\-auto\-attach] | uninstall | status)
 Manage the host's guards: a \fBpre\-commit\fR hook that refuses a commit
 which stages a claimed path, and a \fBpre\-push\fR hook that refuses a
 push whose commits touch one. \fBinit\fR, \fBclone\fR and \fBattach\fR
@@ -95,7 +95,9 @@ install them wherever the host's hooks directory has room, unless given
 \fB\-\-no\-hooks\fR. Where a hook manager owns \fBcore.hooksPath\fR, or
 a hook of the host's own is in the way, \fBhooks install\fR adds them as
 hooks defined in the repository's configuration, which needs git 2.54,
-and otherwise prints the lines to add by hand.
+and otherwise prints the lines to add by hand. \fBhooks install
+\-\-auto\-attach\fR also adds a \fBpost\-checkout\fR hook that runs
+\fBattach \-\-all\fR in every worktree \fBgit worktree add\fR creates.
 .TP
 <name> <git command> [<args>...]
 Run any git command against an inlay, in the current directory.

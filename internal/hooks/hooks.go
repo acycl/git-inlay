@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/atomicfile"
@@ -22,8 +23,14 @@ const (
 	End   = "# <<< git-inlay <<<"
 )
 
-// names lists the hooks installed in the host repository.
-var names = []string{"pre-commit", "pre-push"}
+// guards lists the hooks that carry the host's leak guards.
+var guards = []string{"pre-commit", "pre-push"}
+
+// AttachHook is the host hook that attaches the repository's inlays to a
+// new linked worktree (git runs post-checkout at the end of git worktree
+// add). It is a convenience, not a guard: it is installed only on request,
+// no check counts its absence, and it never fails a checkout.
+const AttachHook = "post-checkout"
 
 // configSince is the first git 2 minor release that runs hooks defined in
 // config (hook.<name>.command and hook.<name>.event), which it does
@@ -104,9 +111,15 @@ func body(sub string) []string {
 	if bin := binary(); bin != "" {
 		fallback = " || bin=" + ShellQuote(bin)
 	}
+	missing := fmt.Sprintf(`{ echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. %s" >&2; exit 1; }`, hint)
+	if sub == AttachHook {
+		// The hook's exit status becomes that of the checkout, which has
+		// done its work; a missing binary only means nothing is attached.
+		missing = "exit 0"
+	}
 	return []string{
 		"bin=$(command -v git-inlay)" + fallback,
-		fmt.Sprintf(`[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. %s" >&2; exit 1; }`, hint),
+		`[ -x "$bin" ] || ` + missing,
 		`exec "$bin" hook ` + sub,
 	}
 }
@@ -189,7 +202,14 @@ func ours(cfg map[string]string, name string) bool {
 // the form every git version runs; a config-defined hook counts where git
 // runs it, judged by the config git reads when it does; otherwise the
 // hooks directory decides.
-func Statuses(h *host.Host) (*Report, error) {
+func Statuses(h *host.Host) (*Report, error) { return statuses(h, guards) }
+
+// AttachStatus reports the state of the hook that attaches inlays to a new
+// worktree, as Statuses does for the guards.
+func AttachStatus(h *host.Host) (*Report, error) { return statuses(h, []string{AttachHook}) }
+
+// statuses is Statuses for the hooks named.
+func statuses(h *host.Host, names []string) (*Report, error) {
 	run := h.Git()
 	hooksPath, err := h.HooksPath()
 	if err != nil {
@@ -306,7 +326,16 @@ func WriteShim(path, sub string) error {
 // state that results, read back, so a guard that config read after the
 // repository's still disables shows as such.
 func Install(h *host.Host) (*Report, error) {
-	_, r, err := install(h, true)
+	_, r, err := install(h, guards, true)
+	return r, err
+}
+
+// InstallAttach puts the hook that attaches inlays to a new worktree in
+// place, as Install does a guard: a shim where the hooks directory has
+// room, otherwise a config-defined hook on git 2.54 or newer, otherwise
+// nothing, which the state it reports shows.
+func InstallAttach(h *host.Host) (*Report, error) {
+	_, r, err := install(h, []string{AttachHook}, true)
 	return r, err
 }
 
@@ -317,14 +346,15 @@ func Install(h *host.Host) (*Report, error) {
 // unasked, so that a new inlay is guarded from its first commit. It
 // returns the hooks it placed a shim for that had none before.
 func InstallFree(h *host.Host) (placed []string, err error) {
-	placed, _, err = install(h, false)
+	placed, _, err = install(h, guards, false)
 	return placed, err
 }
 
-// install is Install, with config-defined hooks only when config is set.
-// It also returns the hooks whose shim it wrote where none was active.
-func install(h *host.Host, config bool) (placed []string, after *Report, err error) {
-	r, err := Statuses(h)
+// install is Install for the hooks named, with config-defined hooks only
+// when config is set. It also returns the hooks whose shim it wrote where
+// none was active.
+func install(h *host.Host, names []string, config bool) (placed []string, after *Report, err error) {
+	r, err := statuses(h, names)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -353,7 +383,7 @@ func install(h *host.Host, config bool) (placed []string, after *Report, err err
 			}
 		}
 	}
-	after, err = Statuses(h)
+	after, err = statuses(h, names)
 	return placed, after, err
 }
 
@@ -395,15 +425,17 @@ func configure(run gitx.Runner, name string, got map[string]string, rewrite bool
 	return nil
 }
 
-// Uninstall removes the shims and config sections it recognizes and leaves
-// everything else.
+// Uninstall removes the shims and config sections it recognizes, the
+// attach hook's among them, and leaves everything else. It reports the
+// guards.
 func Uninstall(h *host.Host) (*Report, error) {
 	run := h.Git()
 	local, err := sections(run, true, allSections)
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range names {
+	all := append(slices.Clone(guards), AttachHook)
+	for _, name := range all {
 		if len(local[name]) == 0 {
 			continue
 		}
@@ -411,7 +443,7 @@ func Uninstall(h *host.Host) (*Report, error) {
 			return nil, err
 		}
 	}
-	r, err := Statuses(h)
+	r, err := statuses(h, all)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +456,7 @@ func Uninstall(h *host.Host) (*Report, error) {
 		}
 		r.Statuses[i].State = Absent
 	}
+	r.Statuses = r.Statuses[:len(guards)]
 	return r, nil
 }
 

@@ -87,7 +87,9 @@ Both install the host's leak guards where its hooks directory has room;
 if they warn that the guards are not active, a hook manager or a hook of
 the host's own is in the way, and `git inlay hooks install` adds the
 guards beside it. In a new linked worktree:
-`git inlay attach --all`. After removing worktrees: `git inlay prune`.
+`git inlay attach --all`, unless the user has run
+`git inlay hooks install --auto-attach`, which makes `git worktree add`
+do it. After removing worktrees: `git inlay prune`.
 
 An inlay's remote must be private and must never be one of the host's
 remotes; git-inlay refuses that. A path the host tracks cannot be claimed

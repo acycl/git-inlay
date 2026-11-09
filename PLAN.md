@@ -219,7 +219,8 @@ command line are relative to the current directory and are normalized against
 | `git inlay check [--staged] [--fix]` | run every invariant from section 6; non-zero exit on any violation; `--fix` runs the sync step first, so what it repairs (stale exclude files, an inlay config that no longer names this host) is not reported |
 | `git inlay restore [<name>]` | re-check out tracked inlay files that are missing from the tree, for example after `git clean -x` |
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
-| `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
+| `git inlay hooks install [--auto-attach] \| uninstall \| status` | manage the host's guards (section 7.3); `--auto-attach` adds the `post-checkout` hook that attaches the inlays to a new worktree (section 7.4) |
+| `git inlay hook post-checkout` | internal; what that hook calls |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay hook session-start` | print a briefing on this worktree's inlays for a coding agent's session-start hook, or nothing where there are none (section 7.6) |
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above, nor a name held back for a later one (`all`, `completion`, `doctor`, `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`, `sync`): `init`, `clone` and `attach` refuse both, since no passthrough could reach an inlay named after a verb, while an inlay that already has a held name keeps working; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
@@ -555,6 +556,23 @@ own index, HEAD, and branch, which matches the mental model of a worktree. Git's
 own linked-worktree mechanism is not used for inlays because the host already
 owns the `.git` file at the worktree root. Objects are duplicated between
 sibling clones; inlay content is small, so this is accepted.
+
+A new worktree has the claims, through the shared exclude file, but not
+the files, until `attach --all` runs in it. That is a step too many where
+worktrees are made often and something starts in them at once: a coding
+agent reads `.claude/` when its session begins. `hooks install
+--auto-attach` therefore adds a `post-checkout` hook, placed as a guard
+is (a shim, or a config-defined hook beside a hook manager on git 2.54 or
+newer). Git runs `post-checkout` at the end of `git worktree add` with
+the null id as the previous HEAD and the branch flag set, which no later
+checkout in the worktree repeats; `hook post-checkout` then runs
+`attach --all` when no inlay is attached there and another worktree has
+one. It is a convenience, not a guard: it is opt-in, `check` does not
+count its absence, a missing binary makes its shim exit 0 where a guard
+fails closed, and it never fails, since its exit status would become the
+checkout's; a failed attach is a warning that names `attach --all`. Once
+installed, `hooks install` keeps it current and `hooks status` lists it;
+`hooks uninstall` removes it with the guards.
 
 `prune` lists `$C/inlays/wt/<id>/` directories whose `$C/worktrees/<id>` is
 gone, or whose gitdir file or the `.git` file it names (resolved against

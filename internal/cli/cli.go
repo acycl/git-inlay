@@ -87,7 +87,9 @@ live inside this repository's working tree.
   check [--staged] [--fix]                verify every invariant
   restore [<name>]                        re-check out missing inlay files
   prune [--dry-run] [--force]             remove inlays whose worktree is gone
-  hooks install|uninstall|status          manage the host's leak guards
+  hooks install|uninstall|status          manage the host's leak guards; install
+                                          --auto-attach also attaches the inlays
+                                          to every new worktree
   <name> <git command> [args]             run git against an inlay
   version, --version                      print versions
 
