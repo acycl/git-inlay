@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Runner executes git against one repository with explicit locations.
@@ -246,30 +247,85 @@ func (r Runner) Succeeds(args ...string) (bool, error) {
 // or an editor that handles the key itself, and dying first would hand
 // the terminal back to the shell while they still read from it. The
 // signals are caught, not ignored, because a child inherits an ignored
-// signal and git would then never see one.
+// signal and git would then never see one. An interrupt that the process
+// was started with ignored stays ignored, for git as well: catching it
+// would hand git the default action, and a job put in the background by a
+// script would then die of a key meant for the foreground. (The Go runtime
+// keeps an inherited disposition only for interrupt and hangup, so a quit
+// is always caught.)
+//
+// When the signal did end the child, the caller finishes its own work and
+// then ends with Reraise.
 func HoldSignals() (release func()) {
+	var held []os.Signal
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGQUIT} {
+		if !signal.Ignored(sig) {
+			held = append(held, sig)
+		}
+	}
+	if len(held) == 0 {
+		return func() {}
+	}
 	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGQUIT)
+	signal.Notify(ch, held...)
 	return func() { signal.Stop(ch) }
+}
+
+// Signaled returns the signal that ended the command err came from, if one
+// did. On Windows no command ends that way.
+func Signaled(err error) (syscall.Signal, bool) {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return 0, false
+	}
+	ws, ok := exitErr.Sys().(syscall.WaitStatus)
+	if !ok || !ws.Signaled() {
+		return 0, false
+	}
+	return ws.Signal(), true
+}
+
+// Reraise ends the process after sig ended a child it held signals for.
+// For an interrupt it dies of the signal itself: that, not a non-zero
+// exit, is what tells a shell to abandon the loop or script the command
+// ran in. For any other signal, and should the interrupt not take, it
+// returns the exit status to use: 128 plus the signal, as a shell reports
+// it. Only the interrupt is raised again because only there does the Go
+// runtime do what the signal does to git: a quit would print a goroutine
+// dump, and a broken pipe, the usual end of a git whose pager was closed,
+// would be dropped.
+func Reraise(sig syscall.Signal) int {
+	if sig != syscall.SIGINT {
+		return 128 + int(sig)
+	}
+	signal.Reset(sig)
+	if p, err := os.FindProcess(os.Getpid()); err == nil && p.Signal(sig) == nil {
+		time.Sleep(time.Second) // the signal is on its way
+	}
+	return 128 + int(sig)
 }
 
 // Passthrough runs git connected to the given streams and returns its exit
 // status. The user's locale is kept so messages read as they normally would,
 // and terminal signals are left to git (see HoldSignals), so the caller
-// still runs when git has been interrupted.
-func (r Runner) Passthrough(stdin io.Reader, stdout, stderr io.Writer, args ...string) (int, error) {
+// still runs when git has been interrupted; killed is then the signal that
+// ended git, for Reraise, and zero otherwise.
+func (r Runner) Passthrough(stdin io.Reader, stdout, stderr io.Writer, args ...string) (code int, killed syscall.Signal, err error) {
 	defer HoldSignals()()
 	cmd := r.Command(args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	var exitErr *exec.ExitError
 	switch {
 	case errors.As(err, &exitErr):
-		return exitErr.ExitCode(), nil
+		if sig, ok := Signaled(err); ok {
+			return 128 + int(sig), sig, nil
+		}
+		return exitErr.ExitCode(), 0, nil
 	case err != nil:
-		return -1, &Error{Args: args, Err: err}
+		return -1, 0, &Error{Args: args, Err: err}
 	}
-	return 0, nil
+	return 0, 0, nil
 }
 
 // capture runs git for machine consumption: LC_ALL=C for stable output, the

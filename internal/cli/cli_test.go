@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -395,6 +396,16 @@ func TestPassthroughOutlivesInterrupt(t *testing.T) {
 	var exitErr *exec.ExitError
 	if err := cmd.Wait(); !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
 		t.Fatalf("passthrough after an interrupt: %v, want git's exit status 7", err)
+	}
+
+	// When the interrupt does end git, git-inlay ends the same way once it
+	// has done its sync: a shell abandons a loop only for a command that
+	// died of the signal. Here the alias interrupts git, its parent.
+	cmd = exec.Command(filepath.Join(binDir, "git-inlay"), "claude", "-c", "alias.die=!kill -INT $PPID; sleep 2", "die")
+	cmd.Dir, cmd.Env = f.root, f.env
+	err := cmd.Run()
+	if sig, ok := gitx.Signaled(err); !ok || sig != syscall.SIGINT {
+		t.Fatalf("passthrough of a git that died of an interrupt: %v, want death by SIGINT", err)
 	}
 }
 

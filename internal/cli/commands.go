@@ -501,6 +501,9 @@ func (c *cli) clone(args []string) error {
 	release()
 	if err != nil {
 		cleanup()
+		if sig, ok := gitx.Signaled(err); ok {
+			return exitError{gitx.Reraise(sig)}
+		}
 		return &gitx.Error{Args: []string{"fetch", "-q", "origin"}, Err: fmt.Errorf("fetch from %s failed: %w", url, err)}
 	}
 	branch, err := defaultBranch(t)
@@ -735,9 +738,16 @@ func (c *cli) passthrough(name string, args []string) error {
 	}
 	before := e.Manifest.Claims
 	tracked, listed := trackedPaths(e)
-	code, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
+	code, killed, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
 	if err != nil {
 		return err
+	}
+	if killed != 0 {
+		// Git died of a signal from the terminal, which this process held
+		// off to get this far. With the sync done it ends the same way,
+		// so that a shell abandons the loop or script it ran in; code is
+		// already what a shell reports for the signal, should that fail.
+		defer gitx.Reraise(killed)
 	}
 	// Even a failed command may have changed a manifest, as a merge that
 	// stops on conflicts does. A failed command's own exit status wins,

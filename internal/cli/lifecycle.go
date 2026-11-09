@@ -327,6 +327,10 @@ func (c *cli) inlayStatus(in *inlay.Inlay, fetch bool) (inlayState, error) {
 		release := gitx.HoldSignals()
 		err := cmd.Run()
 		release()
+		if sig, ok := gitx.Signaled(err); ok {
+			// An interrupt is for the whole command, not for one fetch.
+			return st, exitError{gitx.Reraise(sig)}
+		}
 		if err != nil {
 			c.warnf("fetch for inlay %s failed; showing the last known state", in.Name)
 		}

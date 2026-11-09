@@ -248,8 +248,17 @@ waiting on a pager or an editor that handles it itself, so dying first
 would hand the terminal back to the shell while they still read from
 it. The second sync therefore runs after an interrupted command too.
 The signals are caught, not ignored, since git would inherit an ignored
-signal. The fetch of `clone` and of `status --fetch` holds them the same
-way, so an interrupted clone removes its staging directory. When the inlay's claims changed,
+signal; an interrupt that git-inlay itself was started with ignored is
+left so, for git too. When an interrupt did end git, git-inlay finishes
+the sync and then dies of an interrupt itself, since a shell abandons a
+loop or a script only for a command that died of one, not for one that
+exited non-zero. Any other signal that ends git, a quit or the broken
+pipe of a pager closed early, becomes the exit status a shell reports
+for it, 128 plus the signal: raised again in a Go program, a quit would
+print a goroutine dump and a broken pipe would be dropped. The fetch of `clone` and of `status --fetch` holds the
+signals the same way, so an interrupted clone removes its staging
+directory before it dies, and an interrupted `status --fetch` stops
+rather than move on to the next inlay's fetch. When the inlay's claims changed,
 passthrough then warns, as `check` would report, about any of that
 inlay's claims that overlaps another inlay's or that the host tracks or
 does not ignore: nothing vetted a teammate's claim against this host on
