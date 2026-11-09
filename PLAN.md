@@ -626,7 +626,10 @@ passes I3 and I4 against the real host.
   worktree, since whoever staged the path, a person or a coding agent,
   meant to record it somewhere. Its paths carry the `:(top,literal)`
   pathspec magic, so the commands work from any directory and a leading
-  `!` or a glob character cannot widen them.
+  `!` or a glob character cannot widen them. `claim`, `unclaim` and
+  `which` read their paths relative to the current directory, so they
+  accept a leading `:(top)` for a path relative to the root, and the
+  fixes that name one of those commands write the path that way.
 
 ### 7.6 Coding agents
 

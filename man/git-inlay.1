@@ -31,6 +31,10 @@ lives under the host's \fI.git/inlays/\fR.
 .PP
 Every command but \fBcheck\fR and \fBversion\fR first regenerates the
 two exclude files from the claims, so they are always current.
+.PP
+\fBclaim\fR, \fBunclaim\fR and \fBwhich\fR read paths relative to the
+current directory; a path that starts with \fB:(top)\fR is relative to
+the root of the worktree instead.
 .SH COMMANDS
 .TP
 \fBinit\fR <name> [\-\-remote <url>] [\-\-no\-hooks]

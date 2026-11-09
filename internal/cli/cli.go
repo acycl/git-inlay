@@ -519,10 +519,10 @@ func (s *session) kindViolations(e inlay.Entry) []guard.Violation {
 		}
 		v := guard.Violation{Path: cl.String(), Inlay: e.Name,
 			Reason: "is claimed as a file but is a directory, so the files in it are under no claim",
-			Fix:    fmt.Sprintf("git inlay claim %s %q", e.Name, cl.Path+"/")}
+			Fix:    fmt.Sprintf("git inlay claim %s %q", e.Name, ":(top)"+cl.Path+"/")}
 		if cl.Dir {
 			v.Reason = "is claimed as a directory but is a file, which inlay " + e.Name + " then ignores"
-			v.Fix = fmt.Sprintf("git inlay claim %s %q", e.Name, cl.Path)
+			v.Fix = fmt.Sprintf("git inlay claim %s %q", e.Name, ":(top)"+cl.Path)
 		}
 		vs = append(vs, v)
 	}

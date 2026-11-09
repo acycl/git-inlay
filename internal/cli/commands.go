@@ -169,7 +169,7 @@ func (c *cli) claim(args []string) error {
 	c.printf("staged %d file(s) in inlay %s; commit with: git inlay %s commit -m \"...\"\n", len(files), name, name)
 	for _, cl := range added {
 		if slices.Contains(guessed, cl) {
-			c.warnf("%s does not exist yet and is claimed as a file; if it is to be a directory, claim it with a trailing slash: git inlay claim %s %q", cl, name, cl.Path+"/")
+			c.warnf("%s does not exist yet and is claimed as a file; if it is to be a directory, claim it with a trailing slash: git inlay claim %s %q", cl, name, ":(top)"+cl.Path+"/")
 		}
 	}
 	s.warnIgnored(e.Inlay, added)
@@ -217,7 +217,7 @@ func (c *cli) unclaim(args []string) error {
 		}
 		if !m.Remove(rel) {
 			if cl, ok := m.Owner(rel); ok && cl != m.Self() {
-				return fmt.Errorf("inlay %s has no claim at %s; the claim %s covers it and can only be given up whole: git inlay unclaim %s %q", name, rel, cl, name, cl.String())
+				return fmt.Errorf("inlay %s has no claim at %s; the claim %s covers it and can only be given up whole: git inlay unclaim %s %q", name, rel, cl, name, ":(top)"+cl.String())
 			}
 			return fmt.Errorf("inlay %s has no claim at %s", name, rel)
 		}
@@ -440,7 +440,7 @@ func (c *cli) check(args []string) error {
 				Fix: "remove the pattern that re-includes it from .gitignore"}
 			if o, ok := x.Owner(cl.Path); ok {
 				v.Inlay = o.Inlay
-				v.Fix += fmt.Sprintf("   or   git inlay unclaim %s %s", o.Inlay, cl)
+				v.Fix += fmt.Sprintf("   or   git inlay unclaim %s %q", o.Inlay, ":(top)"+cl.String())
 			}
 			vs = append(vs, v)
 		}

@@ -307,9 +307,15 @@ func (h *Host) Submodules(paths ...string) (map[string]bool, error) {
 // slash path. Symlinks in the existing part of the parent path are resolved
 // so a cwd reached through a symlink still maps into the real root; the
 // last component is kept as named, since git tracks a symlink as itself.
+//
+// A path that starts with ":(top)", as in git's pathspec magic, is relative
+// to the root whatever cwd is. The fixes git-inlay prints name paths that
+// way, so that they work from any directory of the worktree.
 func (h *Host) Rel(cwd, p string) (string, error) {
 	abs := p
-	if !filepath.IsAbs(abs) {
+	if rest, ok := strings.CutPrefix(p, ":(top)"); ok {
+		abs = filepath.Join(h.Root, filepath.FromSlash(rest))
+	} else if !filepath.IsAbs(abs) {
 		abs = filepath.Join(cwd, abs)
 	}
 	abs = filepath.Clean(abs)

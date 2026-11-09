@@ -714,7 +714,7 @@ func TestPulledClaimOnHostTrackedPath(t *testing.T) {
 	}
 	contains(t, errOut, "the claims of inlay team changed, and 1 path(s) are out of place", "pull warning")
 	contains(t, errOut, "shared.md: tracked by the host but claimed by inlay team", "pull warning")
-	contains(t, errOut, `fix: git rm --cached -- "shared.md" && git commit`, "pull warning")
+	contains(t, errOut, `fix: git rm --cached -- ":(top,literal)shared.md" && git commit`, "pull warning")
 	// From the inlay's side the host's copy is an ignored file, which git
 	// replaces without asking; that is what makes the warning matter.
 	if f.read("shared.md") != "private\n" {
@@ -1185,7 +1185,7 @@ func TestUnclaim(t *testing.T) {
 	f.write(".claude/settings.json", "{}\n")
 	f.inlayOK(f.root, "claim", "claude", ".claude")
 	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
-	contains(t, f.inlayFails(f.root, 1, "unclaim", "claude", ".claude/settings.json"), `the claim .claude/ covers it and can only be given up whole: git inlay unclaim claude ".claude/"`, "unclaim beneath a claim")
+	contains(t, f.inlayFails(f.root, 1, "unclaim", "claude", ".claude/settings.json"), `the claim .claude/ covers it and can only be given up whole: git inlay unclaim claude ":(top).claude/"`, "unclaim beneath a claim")
 	contains(t, f.inlayOK(f.root, "unclaim", "claude", ".claude"), "unclaimed .claude from inlay claude", "unclaim output")
 	if got := f.git(f.root, "status", "--porcelain"); got != "?? .claude/" {
 		t.Fatalf("host status after unclaim = %q", got)
@@ -2019,6 +2019,28 @@ func TestInlayPushRefusesStrayInHistory(t *testing.T) {
 		t.Fatal("push of a merged side branch that carried a host file succeeded")
 	}
 	contains(t, errOut, "README.md: is in commit ", "push with the stray on a merged side branch")
+}
+
+// The commands a fix names carry ":(top)", so they mean the same path from
+// any directory of the worktree.
+func TestTopAnchoredPaths(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write("pkg/.keep", "")
+	sub := filepath.Join(f.root, "pkg")
+	_, errOut, code := f.inlay(sub, "claim", "claude", "notes")
+	if code != 0 || !strings.Contains(errOut, `git inlay claim claude ":(top)pkg/notes/"`) {
+		t.Fatalf("claim of a missing path from a subdirectory: exit %d, stderr %q", code, errOut)
+	}
+	f.inlayOK(sub, "claim", "claude", ":(top)pkg/notes/")
+	if got, want := f.inlayOK(f.root, "ls"), "claude\tpkg/notes/"; got != want {
+		t.Fatalf("ls = %q, want %q", got, want)
+	}
+	if got, want := f.inlayOK(sub, "which", ":(top)pkg/notes/a.md"), ":(top)pkg/notes/a.md\tclaude"; got != want {
+		t.Fatalf("which = %q, want %q", got, want)
+	}
+	f.inlayOK(sub, "unclaim", "claude", ":(top)pkg/notes/")
 }
 
 // Moving the host checkout leaves the inlays' absolute paths stale; the

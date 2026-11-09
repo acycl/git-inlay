@@ -135,7 +135,7 @@ func (x *Index) Overlaps(entries []inlay.Entry) []Violation {
 							Path:   ca.String(),
 							Inlay:  a.Name,
 							Reason: fmt.Sprintf("overlaps %s claimed by inlay %s", cb, b.Name),
-							Fix:    fmt.Sprintf("git inlay unclaim %s %s   or   git inlay unclaim %s %s", a.Name, ca, b.Name, cb),
+							Fix:    fmt.Sprintf("git inlay unclaim %s %q   or   git inlay unclaim %s %q", a.Name, ":(top)"+ca.String(), b.Name, ":(top)"+cb.String()),
 						})
 					}
 				}
@@ -165,7 +165,7 @@ func HostTracked(h *host.Host, x *Index) ([]Violation, error) {
 			Path:   p,
 			Inlay:  o.Inlay,
 			Reason: fmt.Sprintf("tracked by the host but claimed by inlay %s", o.Inlay),
-			Fix:    fmt.Sprintf("git rm --cached -- %q && git commit   or   git inlay unclaim %s %s", p, o.Inlay, o.Claim),
+			Fix:    fmt.Sprintf("git rm --cached -- %q && git commit   or   git inlay unclaim %s %q", ":(top,literal)"+p, o.Inlay, ":(top)"+o.Claim.String()),
 		})
 	}
 	return out, nil
@@ -232,7 +232,7 @@ func Containment(in *inlay.Inlay, m *manifest.Manifest) ([]Violation, error) {
 				Path:   p,
 				Inlay:  in.Name,
 				Reason: fmt.Sprintf("tracked by inlay %s but not under any of its claims", in.Name),
-				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q", in.Name, p, in.Name, p),
+				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q", in.Name, ":(top)"+p, in.Name, ":(top,literal)"+p),
 			})
 		}
 	}
@@ -260,7 +260,7 @@ func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 				Path:   p,
 				Inlay:  name,
 				Reason: "is in the tree being pushed but under no claim that inlay " + name + " has committed",
-				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q   then commit", name, p, name, p),
+				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q   then commit", name, ":(top)"+p, name, ":(top,literal)"+p),
 			})
 		}
 	}
