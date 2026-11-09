@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/gitx"
@@ -214,10 +213,7 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	}
 	in := &inlay.Inlay{Name: name, Key: h.Key, GitDir: gitDir, Host: h}
 
-	remoteName, url := "", ""
-	if len(args) > 0 {
-		remoteName = args[0]
-	}
+	url := ""
 	if len(args) > 1 {
 		url = args[1]
 	}
@@ -236,39 +232,21 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	if err != nil {
 		return err
 	}
-	names, err := in.RemoteNames()
-	if err != nil {
-		return err
-	}
-	named := slices.Contains(names, remoteName)
 	var vs []guard.Violation
 	seen := map[string]bool{}
 	for _, u := range updates {
 		if guard.IsZero(u.LocalOID) {
 			continue
 		}
-		// The receiving side sees the manifest committed at the pushed tip,
-		// so that is what the outgoing paths must satisfy (I3), whatever an
-		// uncommitted edit of the working-tree manifest says.
-		m, err := inlay.ManifestAt(in.Git(), name, u.LocalOID)
+		tip, err := guard.ContainmentAt(in.Git(), name, u.LocalOID)
 		if err != nil {
 			return err
 		}
-		paths, err := guard.OutgoingPaths(in.Git(), []guard.RefUpdate{u}, remoteName, named)
-		if err != nil {
-			return err
-		}
-		for _, p := range paths {
-			if _, ok := m.Owner(p); ok || seen[p] {
-				continue
+		for _, v := range tip {
+			if !seen[v.Path] {
+				seen[v.Path] = true
+				vs = append(vs, v)
 			}
-			seen[p] = true
-			vs = append(vs, guard.Violation{
-				Path:   p,
-				Inlay:  name,
-				Reason: "is in the commits being pushed but under no claim of inlay " + name,
-				Fix:    fmt.Sprintf("git inlay claim %s %q and commit, or remove it from the commits", name, p),
-			})
 		}
 	}
 	return c.refuse("push inlay "+name, vs)

@@ -1625,11 +1625,31 @@ func TestInlayPushUsesCommittedManifest(t *testing.T) {
 	if code == 0 {
 		t.Fatal("push of a file outside the committed manifest succeeded")
 	}
-	contains(t, errOut, "notes.md: is in the commits being pushed but under no claim", "inlay pre-push")
+	contains(t, errOut, "notes.md: is in the tree being pushed but under no claim", "inlay pre-push")
 
 	// With the manifest committed too, the same push passes.
 	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "claim notes", "--", ".git-inlay/claude.paths")
 	f.inlayOK(f.root, "claude", "push", "-q", "origin", "main")
+}
+
+// Only the pushed tip must satisfy its manifest: commits that carried a
+// path under a claim since dropped may still be pushed, to the first
+// remote or to a new one.
+func TestInlayPushAfterUnclaim(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "claude", "notes")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "notes")
+	f.inlayOK(f.root, "unclaim", "claude", "notes")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "unclaim notes")
+	f.inlayOK(f.root, "claude", "push", "-q", "origin", "main")
+
+	second := f.bare("claude-second")
+	f.inlayOK(f.root, "claude", "remote", "add", "second", second)
+	f.inlayOK(f.root, "claude", "push", "-q", "second", "main")
 }
 
 // Moving the host checkout leaves the inlays' absolute paths stale; the

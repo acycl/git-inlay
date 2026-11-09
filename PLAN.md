@@ -294,7 +294,7 @@ Guards:
 | claim time | `claim`, `clone`, `attach` | I1 against `git ls-files -z -- <claims>` in the host and against other inlays' manifests |
 | pre-commit | host hook (shim, or config-defined on git 2.54+ where the shim cannot go) | staged paths (`git diff --cached --name-only -z --diff-filter=ACMRT`, as pre-push filters commits) under any claim or under `.git-inlay/`; staged deletions never block |
 | pre-push | host hook (as pre-commit) | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
-| inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the outgoing commits of each ref, judged by the manifest committed at that ref's tip, which is what a clone will enforce |
+| inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the tree at each pushed ref's tip (`git ls-tree -r`), judged by the manifest committed there; earlier commits are not examined, so history that carried a path under a claim since dropped can be pushed; the tip is what a clone will enforce |
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
 | hook presence | `check`; a warning from `init`, `clone`, `attach` | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
 

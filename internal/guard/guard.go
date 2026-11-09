@@ -239,6 +239,35 @@ func Containment(in *inlay.Inlay, m *manifest.Manifest) ([]Violation, error) {
 	return out, nil
 }
 
+// ContainmentAt finds paths in the tree of rev, read through run, that are
+// under no claim of the manifest inlay name has committed there (I3). That
+// tree and that manifest are what the receiving side gets and what a clone
+// of it enforces, whatever an uncommitted edit of the working-tree manifest
+// says. Only the tip counts: a path that an earlier commit carried under a
+// claim since dropped publishes nothing a clone would check out.
+func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
+	m, err := inlay.ManifestAt(run, name, rev)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := run.OutputZ("ls-tree", "-r", "-z", "--name-only", rev)
+	if err != nil {
+		return nil, err
+	}
+	var out []Violation
+	for _, p := range paths {
+		if _, ok := m.Owner(p); !ok {
+			out = append(out, Violation{
+				Path:   p,
+				Inlay:  name,
+				Reason: "is in the tree being pushed but under no claim that inlay " + name + " has committed",
+				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q   then commit", name, p, name, p),
+			})
+		}
+	}
+	return out, nil
+}
+
 // RemoteConflicts finds inlay remotes that resolve to a host remote (I4).
 func RemoteConflicts(hostRemotes []remote.Remote, inlayName string, inlayRemotes []remote.Remote) []Violation {
 	var out []Violation
