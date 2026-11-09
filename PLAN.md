@@ -237,7 +237,14 @@ warning; when git succeeds, a failed sync, such as one that meets a
 pulled manifest that does not parse, fails the command. An interrupt
 from the terminal reaches git-inlay as well as git and skips the second
 sync; the next command catches up, and the guards read the manifests
-themselves rather than rely on it. The hook
+themselves rather than rely on it. When the inlay's claims changed,
+passthrough then warns, as `check` would report, about any of that
+inlay's claims that overlaps another inlay's or that the host tracks or
+does not ignore: nothing vetted a teammate's claim against this host on
+its way in, and none of that can be refused in advance, since the
+incoming claims are unknown until git has run. Other inlays' problems
+are left to `check`, so that one known problem does not repeat on every
+pull. The hook
 family and `check` read manifests but do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
 managed block, or an inlay's stale `info/exclude`) as a violation fixed

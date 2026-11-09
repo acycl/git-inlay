@@ -330,7 +330,11 @@ func (s *session) staleExcludes() (vs []guard.Violation, hostStale bool, err err
 // warnUnexcluded warns about claims the host does not ignore despite the
 // managed block, which the verbs that change claims call: that is where
 // the warning is actionable, and check reports the same as a violation.
-func (s *session) warnUnexcluded() {
+func (s *session) warnUnexcluded() { s.warnUnexcludedOf(nil) }
+
+// warnUnexcludedOf is warnUnexcluded for the claims of m alone, or for
+// every claim when m is nil.
+func (s *session) warnUnexcludedOf(m *manifest.Manifest) {
 	missing, err := s.unexcluded()
 	if err != nil {
 		// A claim beyond a symlink makes check-ignore refuse the whole
@@ -339,8 +343,46 @@ func (s *session) warnUnexcluded() {
 		s.c.warnf("could not verify that the host ignores every claim: %v", err)
 	}
 	for _, cl := range missing {
+		if m != nil && !slices.Contains(m.All(), cl) {
+			continue
+		}
 		s.c.warnf("the host does not ignore %s; a .gitignore pattern outranks the managed exclude block, so the host hooks are the only guard for it. Run: git inlay check", cl)
 	}
+}
+
+// warnChangedClaims warns, after a passthrough command changed the claims
+// of inlay e (as a pull of a teammate's claim does), about those of its
+// claims that break what the claim verbs enforce: one that overlaps
+// another inlay's, or a claimed path the host tracks (I1) or does not
+// ignore (I2). Nothing vetted them on the way in, so check would otherwise
+// be the first to say. Other inlays' problems are check's to report.
+func (s *session) warnChangedClaims(e inlay.Entry) {
+	var vs []guard.Violation
+	x, err := s.guards()
+	if err == nil {
+		for _, o := range s.entries {
+			if o.Name != e.Name {
+				vs = append(vs, x.Overlaps([]inlay.Entry{e, o})...)
+			}
+		}
+		var tracked []guard.Violation
+		tracked, err = guard.HostTracked(s.host, x)
+		for _, v := range tracked {
+			if v.Inlay == e.Name {
+				vs = append(vs, v)
+			}
+		}
+	}
+	if err != nil {
+		s.c.warnf("could not verify the changed claims of inlay %s: %v", e.Name, err)
+	}
+	if len(vs) > 0 {
+		s.c.warnf("the claims of inlay %s changed, and %d path(s) are out of place:", e.Name, len(vs))
+		for _, v := range vs {
+			fmt.Fprintf(s.c.o.Stderr, "  %s\n", v)
+		}
+	}
+	s.warnUnexcludedOf(e.Manifest)
 }
 
 // mine returns the entries attached to the current worktree.

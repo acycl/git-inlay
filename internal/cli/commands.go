@@ -635,7 +635,7 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 // passthrough runs git against an inlay with the terminal attached, then
 // runs the sync step again: a pull, merge, checkout or reset can change a
 // manifest, and without it the host would show newly claimed files until
-// the next command.
+// the next command. Claims that changed are vetted as check would.
 func (c *cli) passthrough(name string, args []string) error {
 	if len(args) == 0 {
 		return usagef("usage: git inlay %s <git command> [args]", name)
@@ -658,6 +658,7 @@ func (c *cli) passthrough(name string, args []string) error {
 		return fmt.Errorf("refusing to run %s against inlay %s: it would %s every file the inlay ignores, which is the whole host tree; run it in the host instead, or deliberately with: git --git-dir=%s --work-tree=%s %s",
 			what, name, verb, e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
 	}
+	before := e.Manifest.Claims
 	code, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
 	if err != nil {
 		return err
@@ -666,6 +667,11 @@ func (c *cli) passthrough(name string, args []string) error {
 	// stops on conflicts does. A failed command's own exit status wins,
 	// since scripts read it (diff --quiet answers 1 for a difference).
 	syncErr := s.refresh()
+	if syncErr == nil {
+		if after, err := s.entry(name); err == nil && !slices.Equal(before, after.Manifest.Claims) {
+			s.warnChangedClaims(after)
+		}
+	}
 	if code != 0 {
 		if syncErr != nil {
 			c.warnf("the exclude files were not brought up to date: %v", syncErr)

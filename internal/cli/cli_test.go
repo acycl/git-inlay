@@ -396,6 +396,79 @@ func TestPulledClaimsApplyAtOnce(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check right after pulling an unclaim")
 }
 
+// A teammate untracks a host file and claims it; pulling the inlay before
+// the host's untracking commit claims a path the host still tracks, which
+// the pull warns about at once with check's fix.
+func TestPulledClaimOnHostTrackedPath(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("team")
+	f.inlayOK(f.root, "init", "team", "--remote", private)
+	f.inlayOK(f.root, "team", "push", "-q", "-u", "origin", "main")
+	f.write("shared.md", "host\n")
+	f.git(f.root, "add", "shared.md")
+	f.git(f.root, "commit", "-q", "-m", "shared.md")
+	f.git(f.root, "push", "-q", "origin", "main")
+	f.inlayOK(f.root, "hooks", "install")
+
+	host2 := filepath.Join(f.base, "host2")
+	f.git(f.base, "clone", "-q", f.remote, host2)
+	f.inlayOK(host2, "clone", private)
+	f.git(host2, "rm", "-q", "--cached", "shared.md")
+	f.git(host2, "commit", "-q", "-m", "untrack shared.md")
+	f.git(host2, "push", "-q", "origin", "main")
+	writeFile(t, filepath.Join(host2, "shared.md"), "private\n")
+	f.inlayOK(host2, "claim", "team", "shared.md")
+	f.inlayOK(host2, "team", "commit", "-q", "-m", "claim shared.md")
+	f.inlayOK(host2, "team", "push", "-q")
+
+	_, errOut, code := f.inlay(f.root, "team", "pull", "-q")
+	if code != 0 {
+		t.Fatalf("pull: exit %d\n%s", code, errOut)
+	}
+	contains(t, errOut, "the claims of inlay team changed, and 1 path(s) are out of place", "pull warning")
+	contains(t, errOut, "shared.md: tracked by the host but claimed by inlay team", "pull warning")
+	contains(t, errOut, `fix: git rm --cached -- "shared.md" && git commit`, "pull warning")
+	// From the inlay's side the host's copy is an ignored file, which git
+	// replaces without asking; that is what makes the warning matter.
+	if f.read("shared.md") != "private\n" {
+		t.Fatal("git kept the host's copy; the scenario no longer tests what it should")
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != " M shared.md" {
+		t.Fatalf("host status after the inlay pull = %q", got)
+	}
+
+	// While that problem stands, a pull that changes no claim vets
+	// nothing and says nothing.
+	writeFile(t, filepath.Join(host2, "shared.md"), "private, edited\n")
+	f.inlayOK(host2, "team", "commit", "-q", "-a", "-m", "edit")
+	f.inlayOK(host2, "team", "push", "-q")
+	if _, errOut, code := f.inlay(f.root, "team", "pull", "-q"); code != 0 || errOut != "" {
+		t.Fatalf("pulling an edit: exit %d, stderr %q", code, errOut)
+	}
+
+	// Nor does another inlay's claim change repeat team's problem.
+	f.inlayOK(f.root, "init", "local")
+	f.write("drafts/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "local", "drafts")
+	f.inlayOK(f.root, "local", "commit", "-q", "-m", "drafts")
+	for _, rev := range []string{"HEAD~1", "HEAD"} {
+		if _, errOut, code := f.inlay(f.root, "local", "checkout", "-q", rev, "--", ".git-inlay/local.paths"); code != 0 || errOut != "" {
+			t.Fatalf("checking out local's manifest at %s: exit %d, stderr %q", rev, code, errOut)
+		}
+	}
+
+	// The fix and the teammate's commit delete the same entry, so the host
+	// pull merges cleanly and leaves the inlay's file in place.
+	f.git(f.root, "rm", "-q", "--cached", "shared.md")
+	f.git(f.root, "commit", "-q", "-m", "untrack shared.md here too")
+	f.git(f.root, "pull", "-q", "--no-rebase", "origin", "main")
+	if got := f.read("shared.md"); got != "private, edited\n" {
+		t.Fatalf("shared.md after the host pull = %q", got)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after the fix")
+}
+
 // A passthrough command that leaves a manifest which does not parse fails
 // the command when git succeeded, and only warns when git failed, whose
 // exit status then comes back unchanged.
