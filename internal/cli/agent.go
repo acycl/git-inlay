@@ -17,8 +17,8 @@ const briefClaims = 20
 // add, and to search that honours git's ignore rules, so an agent that is
 // not told about them cannot see where its edits went or how to record
 // them. Outside a git working tree, or on a host without inlays, it prints
-// nothing and succeeds, so one hook can serve every project. Like the other
-// hooks it reads manifests and writes nothing.
+// nothing and succeeds, so one hook can serve every project. Like the
+// guards it reads manifests and writes nothing.
 func (c *cli) hookSessionStart() error {
 	h, err := host.Discover(c.o.Dir, c.o.Env)
 	if err != nil {

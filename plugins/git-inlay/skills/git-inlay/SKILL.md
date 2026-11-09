@@ -85,8 +85,9 @@ git inlay team push -u origin main
 On another clone of the host: `git inlay clone <private url> [<name>]`.
 Both install the host's leak guards where its hooks directory has room;
 if they warn that the guards are not active, a hook manager or a hook of
-the host's own is in the way, and `git inlay hooks install` adds the
-guards beside it. In a new linked worktree:
+the host's own is in the way: `git inlay hooks install` adds the guards
+beside it on git 2.54 or newer, and on older git prints the lines to add
+to that hook by hand. In a new linked worktree:
 `git inlay attach --all`, unless the user has run
 `git inlay hooks install --auto-attach`, which makes `git worktree add`
 do it. After removing worktrees: `git inlay prune`.

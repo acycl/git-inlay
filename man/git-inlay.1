@@ -29,8 +29,9 @@ itself tracks. The host ignores every claim through a managed block in
 both sides stop anything from crossing over. The inlay's git directory
 lives under the host's \fI.git/inlays/\fR.
 .PP
-Every command but \fBcheck\fR and \fBversion\fR first regenerates the
-two exclude files from the claims, so they are always current.
+Every command but \fBversion\fR and \fBcheck\fR without \fB\-\-fix\fR
+first regenerates the two exclude files from the claims, so they are
+always current.
 .PP
 \fBclaim\fR, \fBunclaim\fR and \fBwhich\fR read paths relative to the
 current directory; a path that starts with \fB:(top)\fR is relative to
@@ -101,7 +102,8 @@ a hook of the host's own is in the way, \fBhooks install\fR adds them as
 hooks defined in the repository's configuration, which needs git 2.54,
 and otherwise prints the lines to add by hand. \fBhooks install
 \-\-auto\-attach\fR also adds a \fBpost\-checkout\fR hook that runs
-\fBattach \-\-all\fR in every worktree \fBgit worktree add\fR creates.
+\fBattach \-\-all\fR in each worktree that \fBgit worktree add\fR
+creates and checks out.
 .TP
 <name> <git command> [<args>...]
 Run any git command against an inlay, in the current directory.

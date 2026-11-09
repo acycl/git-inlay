@@ -103,7 +103,7 @@ problem, naming the path, the owner, and the fix.
 | `git checkout`, `rebase`, `merge`, `stash`, `clean -fd`, `reset --hard` in the host | Nothing. Claimed paths are ignored, so the host leaves them alone. |
 | `git clean -fdx` or `git stash --all` in the host | Ignored files go too. `git inlay restore` brings them back; `stash pop` does as well. |
 | An upstream commit adds a file at a claimed path | Git overwrites the ignored file on checkout. `git inlay check` reports it; `git rm --cached` plus a commit fixes it, and `git inlay <name> checkout -- <path>` restores the inlay's copy. |
-| `git worktree add` | Run `git inlay attach --all` in the new worktree. Claims already bind there through the shared exclude file and hooks. After `git inlay hooks install --auto-attach`, a `post-checkout` hook does it for every new worktree, so the files are in place before a tool or a coding agent starts there. |
+| `git worktree add` | Run `git inlay attach --all` in the new worktree. Claims already bind there through the shared exclude file and hooks. After `git inlay hooks install --auto-attach`, a `post-checkout` hook does it for each new worktree that git checks out, so the files are in place before a tool or a coding agent starts there. |
 | `git worktree remove` | `git inlay prune` removes the worktree's inlays, keeping any with unpushed commits unless forced. |
 | `git inlay <name> clean -x` (or `-X`, or `-e '!…'`) or `stash --all`, also behind an alias | Refused. From the inlay's side every host file is an ignored file, so these would act on the whole tree. Run them in the host. |
 | The checkout is moved or renamed | The next `git inlay` command other than `check`, which reports it, repairs the absolute paths in each inlay's config. |
@@ -164,7 +164,7 @@ and prints the briefing on stdout.
 | `check [--staged] [--fix]` | verify every invariant; `--fix` first regenerates the exclude files and repairs the inlays' config |
 | `restore [<name>]` | re-check out tracked inlay files missing from the tree |
 | `prune [--dry-run] [--force]` | remove inlays whose worktree is gone |
-| `hooks install [--auto-attach] \| uninstall \| status` | manage the host's guards, which `init`, `clone` and `attach` install where they fit; `--auto-attach` adds a hook that attaches the inlays to every new worktree |
+| `hooks install [--auto-attach] \| uninstall \| status` | manage the host's guards, which `init`, `clone` and `attach` install where they fit; `--auto-attach` adds a hook that attaches the inlays to each new worktree |
 | `<name> <git command> [args]` | run git against an inlay |
 
 Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,

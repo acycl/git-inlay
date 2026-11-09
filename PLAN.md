@@ -208,7 +208,7 @@ command line are relative to the current directory and are normalized against
 | Command | Behaviour |
 |---|---|
 | `git inlay init <name> [--remote <url>] [--no-hooks]` | create an empty inlay for this worktree; refuse a remote that matches a host remote; install the host guards that fit (section 7.3) unless `--no-hooks` |
-| `git inlay clone <url> [<name>] [--no-hooks]` | create the inlay from a remote, read its manifest, check claims against the host, check out; `<name>` defaults to the URL's basename |
+| `git inlay clone <url> [<name>] [--no-hooks]` | create the inlay from a remote, read its manifest, check claims against the host, check out; the inlay's name comes from its manifest, and `<name>`, when given, must match it |
 | `git inlay attach <name>... \| --all [--no-hooks]` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
 | `git inlay detach <name> [--force] [--keep-files]` | remove the inlay git dir; refuse with uncommitted changes, stashes, or commits on no remote unless forced; delete the inlay's tracked files unless `--keep-files`, never a file the host also tracks |
 | `git inlay claim <name> <path>...` | validate, add to manifest, regenerate excludes, stage manifest and paths in the inlay |
@@ -226,8 +226,9 @@ command line are relative to the current directory and are normalized against
 | `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above, nor a name held back for a later one (`all`, `completion`, `doctor`, `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`, `sync`): `init` refuses both, and `clone` and `attach` refuse an inlay named after a verb, which no passthrough could reach, while an inlay that already has a held name is cloned, attached and reached as before; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` (or `--version`) | print version and the git version in use |
 
-Every command except `version`, `check` and the `hook` family begins with a
-sync step: read the manifests of all attached inlays and regenerate the host managed
+Every command except `version`, `check` without `--fix` and the `hook`
+family begins with a sync step (`hook post-checkout` reaches one through
+the `attach --all` it runs): read the manifests of all attached inlays and regenerate the host managed
 block and this worktree's inlay excludes, without starting a git process
 beyond host discovery, a manifest read from HEAD where the file is
 missing (below), and the repair of a moved checkout. The claim verbs
@@ -272,8 +273,9 @@ path writes it into the tree, over the host's file if one is there,
 because from the inlay's side every host file is ignored and git
 overwrites ignored files silently. `clone` and `attach` refuse such a
 tree before checkout; a pull cannot be vetted in advance, so the warning
-is what tells the user to look at the host's `git status`. The hook
-family and `check` read manifests but do not write: `check` reports an
+is what tells the user to look at the host's `git status`. The guards
+of the hook family, `hook session-start` and `check` read manifests but
+do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
 managed block, or an inlay's stale `info/exclude`) as a violation, so it can see a hand edit and runs on a read-only
 `.git`. `check --fix` is the named way to repair it: it runs the sync
@@ -549,8 +551,8 @@ shims that `init`, `clone` and `attach` place. The host
 hooks directory and the repository config are shared by linked worktrees,
 so one install covers all of them.
 
-`hooks status` reports, per hook, one of: `installed` (our shim),
-`configured` (our config-defined hook, on git 2.54 or newer), `disabled`
+`hooks status` reports, per hook, one of: `installed` (our shim), `inert`
+(our shim without its executable bit), `configured` (our config-defined hook, on git 2.54 or newer), `disabled`
 (that hook with `enabled = false`), `managed` by `core.hooksPath`,
 `foreign` (present without our marker), or `absent`. `check` reports a hook
 that runs no guard while `hooks install` could place one, which on git 2.54
@@ -573,10 +575,12 @@ agent reads `.claude/` when its session begins. `hooks install
 --auto-attach` therefore adds a `post-checkout` hook, placed as a guard
 is (a shim, or a config-defined hook beside a hook manager on git 2.54 or
 newer). Git runs `post-checkout` at the end of `git worktree add` with
-the null id as the previous HEAD and the branch flag set, which no later
-checkout in the worktree repeats; `hook post-checkout` then runs
-`attach --all` when no inlay is attached there and another worktree has
-one. It is a convenience, not a guard: it is opt-in, `check` does not
+the null id as the previous HEAD and the branch flag set, unless the
+worktree is made with `--no-checkout` or `--orphan`, which run no hook;
+`hook post-checkout` then runs `attach --all` when no inlay is attached
+there and another worktree has one. A checkout that leaves an unborn
+branch reports the same null id, so it attaches too if the worktree has
+no inlay yet, which is no harm: `attach` never overwrites a file. It is a convenience, not a guard: it is opt-in, `check` does not
 count its absence, a missing binary makes its shim exit 0 where a guard
 fails closed, and it never fails, since its exit status would become the
 checkout's; a failed attach is a warning that names `attach --all`. Once

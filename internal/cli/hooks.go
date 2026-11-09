@@ -143,7 +143,8 @@ func (c *cli) hook(args []string) error {
 // worktree add has just created, so that their files are in place before
 // anything, a coding agent's session say, starts in it. Git runs
 // post-checkout there with the null id as the previous HEAD and the branch
-// flag set, which no later checkout in the worktree repeats. It does
+// flag set; so does a checkout that leaves an unborn branch, where attaching
+// is as harmless, since attach never overwrites a file. It does
 // nothing where an inlay is already attached or no other worktree has
 // one, and it never fails: its exit status would become the checkout's,
 // and attach --all remains the way to do the same by hand.
