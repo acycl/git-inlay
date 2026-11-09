@@ -21,6 +21,10 @@ import (
 // host (PLAN.md section 6). Files that are present, modified or not, are
 // left alone.
 func (c *cli) restore(args []string) error {
+	args, err := parseArgs(c.flagSet("restore"), args)
+	if err != nil {
+		return err
+	}
 	if len(args) > 1 {
 		return usagef("usage: git inlay restore [<name>]")
 	}

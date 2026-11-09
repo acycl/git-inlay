@@ -39,12 +39,33 @@ const (
 	exitGit       = 3
 )
 
-// reserved lists every verb, so none can name an inlay.
-var reserved = map[string]bool{
+// implemented lists every verb dispatch routes, so none can name an inlay.
+var implemented = map[string]bool{
 	"init": true, "clone": true, "attach": true, "detach": true, "claim": true,
 	"unclaim": true, "ls": true, "which": true, "status": true, "check": true,
 	"restore": true, "prune": true, "hooks": true, "hook": true, "version": true,
 	"help": true,
+}
+
+// held lists names kept back for verbs a later release may add. A new
+// inlay cannot take one, so that such a verb never hides an inlay; one
+// that already has the name keeps working, since dispatch routes only the
+// implemented verbs.
+var held = map[string]bool{
+	"all": true, "completion": true, "doctor": true, "each": true, "exec": true,
+	"fetch": true, "list": true, "mv": true, "pull": true, "push": true,
+	"repair": true, "show": true, "sync": true,
+}
+
+// reservedName refuses a name that is, or may become, a verb.
+func reservedName(name string) error {
+	switch {
+	case implemented[name]:
+		return fmt.Errorf("%q is a git-inlay command and cannot name an inlay", name)
+	case held[name]:
+		return fmt.Errorf("%q is reserved for a future git-inlay command and cannot name an inlay", name)
+	}
+	return nil
 }
 
 const usage = `usage: git inlay <command> [args]
@@ -133,6 +154,12 @@ func (c *cli) dispatch(args []string) error {
 		return exitError{exitUsage}
 	}
 	verb, rest := args[0], args[1:]
+	// Before the verb reads its arguments, so that no verb takes --help
+	// for a path or an inlay; the hook family passes its arguments on.
+	if implemented[verb] && verb != "hook" && wantsHelp(rest) {
+		fmt.Fprint(c.o.Stdout, usage)
+		return nil
+	}
 	switch verb {
 	case "help", "-h", "--help":
 		fmt.Fprint(c.o.Stdout, usage)
@@ -172,6 +199,20 @@ func (c *cli) dispatch(args []string) error {
 		return usagef("unknown command %q", verb)
 	}
 	return c.passthrough(verb, rest)
+}
+
+// wantsHelp reports whether args ask for help with -h or --help before any
+// "--".
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--":
+			return false
+		case "-h", "--help":
+			return true
+		}
+	}
+	return false
 }
 
 // flagSet returns a quiet flag set; its errors surface as usage errors.

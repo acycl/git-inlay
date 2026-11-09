@@ -62,6 +62,9 @@ func (s *session) attachOne(name string) error {
 	if err := manifest.ValidName(name); err != nil {
 		return usageError{err.Error()}
 	}
+	if err := reservedName(name); err != nil {
+		return usageError{err.Error()}
+	}
 	e, ok := s.sibling(name)
 	if !ok {
 		if _, err := s.entry(name); err == nil {

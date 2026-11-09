@@ -290,6 +290,7 @@ func TestClaimRefusals(t *testing.T) {
 		t.Fatalf("redundant claim: exit %d, stderr %q", code, errOut)
 	}
 	contains(t, f.inlayFails(f.root, 2, "init", "status"), "cannot name an inlay", "reserved name")
+	contains(t, f.inlayFails(f.root, 2, "init", "sync"), "reserved for a future git-inlay command", "held name")
 	f.inlayFails(f.root, 2, "init", "Bad_Name")
 	f.inlayOK(f.root, "hooks", "install")
 	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 1 claim(s)", "check")
@@ -320,6 +321,51 @@ func TestClaimKindFollowsDisk(t *testing.T) {
 	}
 	contains(t, f.inlayOK(f.root, "which", ".claude/skills/internal/x.md"), "\tclaude", "which after the claim is fixed")
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after the claim is fixed")
+}
+
+// Every verb reads its arguments the same way: "--" ends the options, an
+// unknown option is a usage error rather than a path, and --help prints
+// the usage instead of acting.
+func TestArgumentsAndHelp(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write("foo.md", "x\n")
+	f.write("-dash.md", "x\n")
+	f.inlayOK(f.root, "claim", "claude", "--", "foo.md", "-dash.md")
+	if got, want := f.inlayOK(f.root, "ls"), "claude\t-dash.md\nclaude\tfoo.md"; got != want {
+		t.Fatalf("ls after claim -- = %q, want %q", got, want)
+	}
+	f.inlayFails(f.root, 2, "claim", "claude", "-dash.md")
+	f.inlayOK(f.root, "unclaim", "claude", "--", "-dash.md")
+	for _, args := range [][]string{
+		{"claim", "claude", "--help"}, {"unclaim", "claude", "-h"}, {"ls", "--help"},
+		{"clone", "--help"}, {"restore", "-h"}, {"hooks", "--help"}, {"help"},
+	} {
+		contains(t, f.inlayOK(f.root, args...), "usage: git inlay <command>", strings.Join(args, " "))
+	}
+	if got, want := f.inlayOK(f.root, "ls"), "claude\tfoo.md"; got != want {
+		t.Fatalf("ls after the help requests = %q, want %q", got, want)
+	}
+}
+
+// An inlay whose name is a verb could never be reached by passthrough, so
+// clone refuses one.
+func TestCloneRefusesVerbName(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("status-private")
+	src := filepath.Join(f.base, "src")
+	writeFile(t, filepath.Join(src, ".git-inlay", "status.paths"), "notes.md\n")
+	writeFile(t, filepath.Join(src, "notes.md"), "n\n")
+	f.git(src, "init", "-q", "-b", "main")
+	f.git(src, "add", "-A")
+	f.git(src, "commit", "-q", "-m", "inlay")
+	f.git(src, "push", "-q", private, "main")
+	contains(t, f.inlayFails(f.root, 1, "clone", private), `"status" is a git-inlay command and cannot name an inlay`, "clone of an inlay named after a verb")
+	if f.exists("notes.md") {
+		t.Fatal("the refused clone checked out files")
+	}
 }
 
 // Scenario 10: passthrough runs git against the inlay and refuses bad names.

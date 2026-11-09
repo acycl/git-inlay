@@ -27,8 +27,8 @@ func (c *cli) init(args []string) error {
 		return usagef("usage: git inlay init <name> [--remote <url>]")
 	}
 	name := pos[0]
-	if reserved[name] {
-		return usagef("%q is a git-inlay command and cannot name an inlay", name)
+	if err := reservedName(name); err != nil {
+		return usageError{err.Error()}
 	}
 	if err := manifest.ValidName(name); err != nil {
 		return usageError{err.Error()}
@@ -80,10 +80,14 @@ func (c *cli) init(args []string) error {
 
 // claim gives paths to an inlay.
 func (c *cli) claim(args []string) error {
-	if len(args) < 2 {
-		return usagef("usage: git inlay claim <name> <path>...")
+	pos, err := parseArgs(c.flagSet("claim"), args)
+	if err != nil {
+		return err
 	}
-	name, paths := args[0], args[1:]
+	if len(pos) < 2 {
+		return usagef("usage: git inlay claim <name> [--] <path>...")
+	}
+	name, paths := pos[0], pos[1:]
 	s, err := c.open()
 	if err != nil {
 		return err
@@ -172,10 +176,14 @@ func (c *cli) claim(args []string) error {
 
 // unclaim takes paths back from an inlay. The files stay on disk.
 func (c *cli) unclaim(args []string) error {
-	if len(args) < 2 {
-		return usagef("usage: git inlay unclaim <name> <path>...")
+	pos, err := parseArgs(c.flagSet("unclaim"), args)
+	if err != nil {
+		return err
 	}
-	name, paths := args[0], args[1:]
+	if len(pos) < 2 {
+		return usagef("usage: git inlay unclaim <name> [--] <path>...")
+	}
+	name, paths := pos[0], pos[1:]
 	s, err := c.open()
 	if err != nil {
 		return err
@@ -414,6 +422,10 @@ func (c *cli) check(args []string) error {
 
 // clone attaches an inlay from its remote (PLAN.md section 7.2).
 func (c *cli) clone(args []string) error {
+	args, err := parseArgs(c.flagSet("clone"), args)
+	if err != nil {
+		return err
+	}
 	if len(args) < 1 || len(args) > 2 {
 		return usagef("usage: git inlay clone <url> [<name>]")
 	}
@@ -637,6 +649,10 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 	}
 	if err := manifest.ValidName(name); err != nil {
 		return "", err
+	}
+	// Attached under a verb's name, no passthrough command could reach it.
+	if err := reservedName(name); err != nil {
+		return "", fmt.Errorf("%s: %w", url, err)
 	}
 	return name, nil
 }

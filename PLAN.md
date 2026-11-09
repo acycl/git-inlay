@@ -222,7 +222,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
 | `git inlay hook pre-commit\|pre-push\|inlay-pre-push` | internal; what the shims call |
 | `git inlay hook session-start` | print a briefing on this worktree's inlays for a coding agent's session-start hook, or nothing where there are none (section 7.6) |
-| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
+| `git inlay <name> <git args...>` | passthrough: run git against the inlay; `<name>` cannot be a verb above, nor a name held back for a later one (`all`, `completion`, `doctor`, `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`, `sync`): `init`, `clone` and `attach` refuse both, since no passthrough could reach an inlay named after a verb, while an inlay that already has a held name keeps working; `clean -x`, `-X` or `-e '!…'` and `stash [push] --all`/`-a` are refused, since from the inlay's side the whole host tree is ignored files |
 | `git inlay version` (or `--version`) | print version and the git version in use |
 
 Every command except `version`, `check` and the `hook` family begins with a
@@ -547,6 +547,11 @@ passes I3 and I4 against the real host.
 
 - Exit codes: 0 success, 1 invariant violation or guard refusal, 2 usage, 3
   git failure.
+- Every verb reads its arguments alike: options anywhere, `--` ends them,
+  an unknown option is a usage error and never a path, and `-h` or
+  `--help` after a verb prints the usage and does nothing else.
+  (`git inlay --help` itself never arrives: git turns it into
+  `git help inlay`.)
 - Human output on stdout, diagnostics on stderr, no color by default,
   `--porcelain` on `ls` and `status` for scripting.
 - Every refusal names the path, the owner, and the fix. The pre-commit
