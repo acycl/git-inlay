@@ -632,7 +632,10 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 	return name, nil
 }
 
-// passthrough runs git against an inlay with the terminal attached.
+// passthrough runs git against an inlay with the terminal attached, then
+// runs the sync step again: a pull, merge, checkout or reset can change a
+// manifest, and without it the host would show newly claimed files until
+// the next command.
 func (c *cli) passthrough(name string, args []string) error {
 	if len(args) == 0 {
 		return usagef("usage: git inlay %s <git command> [args]", name)
@@ -659,8 +662,18 @@ func (c *cli) passthrough(name string, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Even a failed command may have changed a manifest, as a merge that
+	// stops on conflicts does. A failed command's own exit status wins,
+	// since scripts read it (diff --quiet answers 1 for a difference).
+	syncErr := s.refresh()
 	if code != 0 {
+		if syncErr != nil {
+			c.warnf("the exclude files were not brought up to date: %v", syncErr)
+		}
 		return exitError{code}
+	}
+	if syncErr != nil {
+		return fmt.Errorf("git succeeded, but the exclude files were not brought up to date: %w", syncErr)
 	}
 	return nil
 }

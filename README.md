@@ -58,7 +58,9 @@ the inlay.
 - Every command regenerates two exclude files: a managed block in the
   host's `.git/info/exclude` that hides every claim, and the inlay's own
   exclude that hides everything *but* its claims. Neither repository sees
-  the other's files.
+  the other's files. `git inlay <name> <git command>` regenerates them
+  again after git exits, so a claim that arrives with
+  `git inlay <name> pull` applies at once.
 - Claims are disjoint by construction: a path tracked by the host, or
   claimed by another inlay, cannot be claimed.
 - `.claude/` can be shared. The host may track `.claude/skills/public/`

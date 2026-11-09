@@ -228,8 +228,16 @@ missing (below), and the repair of a moved checkout. The claim verbs
 (`init`, for the manifest's own claim, `claim`, `unclaim`, `clone`,
 `attach`, `detach`) then verify I2
 with one `git check-ignore` and warn on a claim the host does not ignore;
-`check` reports the same as a violation, and is the only place a manifest
-changed through passthrough, such as by a pull, is checked. The hook
+`check` reports the same as a violation. Passthrough runs the sync step
+again once git exits, whatever its status, since a pull, merge, checkout
+or reset can change a manifest; otherwise the host would show a newly
+pulled claim's files as untracked until the next command. When git
+fails, its exit status wins and a failure of that second sync is only a
+warning; when git succeeds, a failed sync, such as one that meets a
+pulled manifest that does not parse, fails the command. An interrupt
+from the terminal reaches git-inlay as well as git and skips the second
+sync; the next command catches up, and the guards read the manifests
+themselves rather than rely on it. The hook
 family and `check` read manifests but do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
 managed block, or an inlay's stale `info/exclude`) as a violation fixed

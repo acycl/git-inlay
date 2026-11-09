@@ -353,6 +353,70 @@ func TestCloneOntoFreshHost(t *testing.T) {
 	}
 }
 
+// A claim that arrives through a pull applies as soon as the pull returns:
+// the host ignores the new files and both exclude files are current, with
+// no further git-inlay command. An unclaim travels the same way.
+func TestPulledClaimsApplyAtOnce(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("team")
+	f.inlayOK(f.root, "init", "team", "--remote", private)
+	f.write("CLAUDE.local.md", "notes\n")
+	f.inlayOK(f.root, "claim", "team", "CLAUDE.local.md")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "claims")
+	f.inlayOK(f.root, "team", "push", "-q", "-u", "origin", "main")
+	f.inlayOK(f.root, "hooks", "install")
+
+	host2 := filepath.Join(f.base, "host2")
+	f.git(f.base, "clone", "-q", f.remote, host2)
+	f.inlayOK(host2, "clone", private)
+	writeFile(t, filepath.Join(host2, "docs", "private", "plan.md"), "plan\n")
+	f.inlayOK(host2, "claim", "team", "docs/private")
+	f.inlayOK(host2, "team", "commit", "-q", "-m", "claim docs/private")
+	f.inlayOK(host2, "team", "push", "-q")
+
+	if _, errOut, code := f.inlay(f.root, "team", "pull", "-q"); code != 0 || errOut != "" {
+		t.Fatalf("pulling a sound claim: exit %d, stderr %q", code, errOut)
+	}
+	if got := f.read("docs/private/plan.md"); got != "plan\n" {
+		t.Fatalf("pulled file = %q", got)
+	}
+	if got := f.git(f.root, "status", "--porcelain", "--untracked-files=all"); got != "" {
+		t.Fatalf("host status right after pulling a claim = %q", got)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check right after pulling a claim")
+
+	f.inlayOK(host2, "unclaim", "team", "docs/private")
+	f.inlayOK(host2, "team", "commit", "-q", "-m", "unclaim docs/private")
+	f.inlayOK(host2, "team", "push", "-q")
+	f.inlayOK(f.root, "team", "pull", "-q")
+	if strings.Contains(f.read(".git/info/exclude"), "/docs/private") {
+		t.Fatalf("the managed block still hides an unclaimed path:\n%s", f.read(".git/info/exclude"))
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check right after pulling an unclaim")
+}
+
+// A passthrough command that leaves a manifest which does not parse fails
+// the command when git succeeded, and only warns when git failed, whose
+// exit status then comes back unchanged.
+func TestPassthroughSyncFailure(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	manifest := filepath.ToSlash(filepath.Join(f.root, ".git-inlay", "team.paths"))
+	good := f.read(".git-inlay/team.paths")
+	breakIt := `alias.breakit=!printf 'a//b\n' >> "` + manifest + `"`
+
+	errOut := f.inlayFails(f.root, 1, "team", "-c", breakIt, "breakit")
+	contains(t, errOut, "git succeeded, but the exclude files were not brought up to date", "sync failure after git succeeded")
+	contains(t, errOut, "empty path segment", "sync failure after git succeeded")
+
+	f.write(".git-inlay/team.paths", good)
+	errOut = f.inlayFails(f.root, 5, "team", "-c", breakIt+"; exit 5", "breakit")
+	contains(t, errOut, "warning: the exclude files were not brought up to date", "sync failure after git failed")
+	contains(t, errOut, "empty path segment", "sync failure after git failed")
+}
+
 // Scenario 5: an inlay remote that resolves to a host remote is refused.
 func TestRemoteGuard(t *testing.T) {
 	t.Parallel()
