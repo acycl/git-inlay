@@ -80,11 +80,13 @@ git inlay init team --remote <private url>   # a new, empty inlay
 git inlay claim team .claude/settings.json CLAUDE.local.md
 git inlay team commit -m "team settings"
 git inlay team push -u origin main
-git inlay hooks install                       # the host's leak guards
 ```
 
-On another clone of the host: `git inlay clone <private url> [<name>]`,
-then `git inlay hooks install`. In a new linked worktree:
+On another clone of the host: `git inlay clone <private url> [<name>]`.
+Both install the host's leak guards where its hooks directory has room;
+if they warn that the guards are not active, a hook manager or a hook of
+the host's own is in the way, and `git inlay hooks install` adds the
+guards beside it. In a new linked worktree:
 `git inlay attach --all`. After removing worktrees: `git inlay prune`.
 
 An inlay's remote must be private and must never be one of the host's

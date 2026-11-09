@@ -461,6 +461,38 @@ func TestShimWithoutExecutableBit(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after hooks install")
 }
 
+// init guards a new inlay from its first commit: it installs the shims
+// where the hooks directory is free, leaves a hook of the host's own
+// alone, and installs nothing with --no-hooks.
+func TestInitInstallsFreeGuards(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	foreign := "#!/bin/sh\nexit 0\n"
+	f.write(".git/hooks/pre-push", foreign)
+	out, errOut, code := f.inlay(f.root, "init", "claude")
+	if code != 0 {
+		t.Fatalf("init: exit %d\n%s", code, errOut)
+	}
+	contains(t, out, "installed the host's pre-commit guard(s)", "init output")
+	if got := f.read(".git/hooks/pre-push"); got != foreign {
+		t.Fatalf("init rewrote the host's own pre-push hook:\n%s", got)
+	}
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak"), "belongs to inlay claude", "pre-commit after init")
+
+	g := newFixture(t)
+	out, errOut, code = g.inlay(g.root, "init", "claude", "--no-hooks")
+	if code != 0 || strings.Contains(out, "installed the host's") {
+		t.Fatalf("init --no-hooks: exit %d, stdout %q", code, out)
+	}
+	contains(t, errOut, "host leak guards are not active", "init --no-hooks")
+	if g.exists(".git/hooks/pre-commit") {
+		t.Fatal("init --no-hooks installed a shim")
+	}
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {
@@ -1622,7 +1654,7 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	private := f.bare("claude-private")
-	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.inlayOK(f.root, "init", "claude", "--remote", private, "--no-hooks")
 	f.write(".claude/settings.json", "{}\n")
 	f.write(".claude/other.json", "{}\n")
 	f.inlayOK(f.root, "claim", "claude", ".claude")
@@ -1704,7 +1736,7 @@ func TestHooksPathScriptsRunGuards(t *testing.T) {
 func TestPreCommitFrameworkProtocol(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	f.inlayOK(f.root, "init", "claude")
+	f.inlayOK(f.root, "init", "claude", "--no-hooks")
 	f.write(".claude/settings.json", "{}\n")
 	f.inlayOK(f.root, "claim", "claude", ".claude")
 	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
@@ -2178,12 +2210,12 @@ func TestSessionStartBriefing(t *testing.T) {
 	}
 	f.inlayFails(f.root, 2, "hook", "session-start", "extra")
 
-	f.inlayOK(f.root, "init", "team")
+	f.inlayOK(f.root, "init", "team", "--no-hooks")
 	f.write(".claude/settings.json", "{}\n")
 	f.write("CLAUDE.local.md", "notes\n")
 	f.inlayOK(f.root, "claim", "team", "CLAUDE.local.md", ".claude")
 	f.inlayOK(f.root, "team", "commit", "-q", "-m", "claims") // attach checks out what is committed
-	f.inlayOK(f.root, "init", "empty")
+	f.inlayOK(f.root, "init", "empty", "--no-hooks")
 	sub := filepath.Join(f.root, "pkg")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)

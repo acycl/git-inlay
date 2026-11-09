@@ -23,17 +23,19 @@ import (
 func (c *cli) attach(args []string) error {
 	fs := c.flagSet("attach")
 	all := fs.Bool("all", false, "attach every inlay found in another worktree")
+	noHooks := fs.Bool("no-hooks", false, "do not install the host's guards")
 	names, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if (len(names) == 0 && !*all) || (len(names) > 0 && *all) {
-		return usagef("usage: git inlay attach <name>... | --all")
+		return usagef("usage: git inlay attach <name>... | --all [--no-hooks]")
 	}
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
+	s.noHooks = *noHooks
 	if err := s.refuseSparse(); err != nil {
 		return err
 	}

@@ -76,6 +76,8 @@ live inside this repository's working tree.
   init <name> [--remote <url>]            create an empty inlay for this worktree
   clone <url> [<name>]                    attach an inlay from its remote
   attach <name>... | --all                copy inlays from another worktree
+                                          (these three install the host's guards
+                                          where they fit, unless given --no-hooks)
   detach <name> [--force] [--keep-files]  remove an inlay from this worktree
   claim <name> <path>...                  give paths to an inlay
   unclaim <name> <path>...                take paths back from an inlay
@@ -267,6 +269,7 @@ type session struct {
 	host    *host.Host
 	entries []inlay.Entry
 	index   *guard.Index
+	noHooks bool // --no-hooks: leave the host's hooks directory alone
 }
 
 // open discovers the host and runs the sync step from PLAN.md section 5:
@@ -600,6 +603,26 @@ func more(n int) string {
 		return ""
 	}
 	return fmt.Sprintf(" and %d more", n)
+}
+
+// guardHost is what init, clone and attach do for the host's guards once
+// an inlay is in place: unless the user declined with --no-hooks, install
+// the shims that fit without touching anything of the host's (a free
+// place in the hooks directory), then warn about a guard still not
+// active. A new inlay is thereby guarded from its first commit, and a
+// host with a hook manager or hooks of its own is left for the user to
+// decide on with hooks install.
+func (s *session) guardHost() {
+	if !s.noHooks {
+		placed, err := hooks.InstallFree(s.host)
+		switch {
+		case err != nil:
+			s.c.warnf("could not install the host leak guards: %v", err)
+		case len(placed) > 0:
+			s.c.printf("installed the host's %s guard(s); git inlay hooks uninstall removes them\n", strings.Join(placed, " and "))
+		}
+	}
+	s.hooksReminder()
 }
 
 // hooksReminder warns when a host leak guard is not active.

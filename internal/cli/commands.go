@@ -19,12 +19,13 @@ import (
 func (c *cli) init(args []string) error {
 	fs := c.flagSet("init")
 	remoteURL := fs.String("remote", "", "remote URL for the new inlay")
+	noHooks := fs.Bool("no-hooks", false, "do not install the host's guards")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return usagef("usage: git inlay init <name> [--remote <url>]")
+		return usagef("usage: git inlay init <name> [--remote <url>] [--no-hooks]")
 	}
 	name := pos[0]
 	if err := reservedName(name); err != nil {
@@ -74,7 +75,8 @@ func (c *cli) init(args []string) error {
 	s.warnUnexcluded() // the manifest is a claim too
 	c.printf("initialized inlay %s at %s\n", name, in.GitDir)
 	c.printf("next: git inlay claim %s <path>...\n", name)
-	s.hooksReminder()
+	s.noHooks = *noHooks
+	s.guardHost()
 	return nil
 }
 
@@ -422,18 +424,21 @@ func (c *cli) check(args []string) error {
 
 // clone attaches an inlay from its remote (PLAN.md section 7.2).
 func (c *cli) clone(args []string) error {
-	args, err := parseArgs(c.flagSet("clone"), args)
+	fs := c.flagSet("clone")
+	noHooks := fs.Bool("no-hooks", false, "do not install the host's guards")
+	args, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(args) < 1 || len(args) > 2 {
-		return usagef("usage: git inlay clone <url> [<name>]")
+		return usagef("usage: git inlay clone <url> [<name>] [--no-hooks]")
 	}
 	url := args[0]
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
+	s.noHooks = *noHooks
 	if err := s.refuseSparse(); err != nil {
 		return err
 	}
@@ -606,7 +611,7 @@ func (s *session) attached(in *inlay.Inlay, m *manifest.Manifest) {
 	}
 	s.warnIgnored(in, m.Claims)
 	s.warnHistory(m.Claims)
-	s.hooksReminder()
+	s.guardHost()
 }
 
 // defaultBranch asks the remote which branch its HEAD points at, falling

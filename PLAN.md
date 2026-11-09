@@ -207,9 +207,9 @@ command line are relative to the current directory and are normalized against
 
 | Command | Behaviour |
 |---|---|
-| `git inlay init <name> [--remote <url>]` | create an empty inlay for this worktree; refuse a remote that matches a host remote |
-| `git inlay clone <url> [<name>]` | create the inlay from a remote, read its manifest, check claims against the host, check out; `<name>` defaults to the URL's basename |
-| `git inlay attach <name>... \| --all` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
+| `git inlay init <name> [--remote <url>] [--no-hooks]` | create an empty inlay for this worktree; refuse a remote that matches a host remote; install the host guards that fit (section 7.3) unless `--no-hooks` |
+| `git inlay clone <url> [<name>] [--no-hooks]` | create the inlay from a remote, read its manifest, check claims against the host, check out; `<name>` defaults to the URL's basename |
+| `git inlay attach <name>... \| --all [--no-hooks]` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
 | `git inlay detach <name> [--force] [--keep-files]` | remove the inlay git dir; refuse with uncommitted changes, stashes, or commits on no remote unless forced; delete the inlay's tracked files unless `--keep-files`, never a file the host also tracks |
 | `git inlay claim <name> <path>...` | validate, add to manifest, regenerate excludes, stage manifest and paths in the inlay |
 | `git inlay unclaim <name> <path>...` | remove from manifest, `git rm --cached` in the inlay, regenerate; warn that the files are now visible to the host |
@@ -314,7 +314,7 @@ Guards:
 | pre-push | host hook (as pre-commit) | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
 | inlay pre-push | hook in each inlay git dir | I4 on the destination URL; I3 on the tree at each pushed ref's tip (`git ls-tree -r`), judged by the manifest committed there; earlier commits are not examined, so history that carried a path under a claim since dropped can be pushed; the tip is what a clone will enforce |
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
-| hook presence | `check`; a warning from `init`, `clone`, `attach` | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
+| hook presence | `check`; `init`, `clone`, `attach` place the shims that fit and warn about the rest | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
 
 The pre-push input is accepted in two forms: the stdin lines git provides, and the
 `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and `PRE_COMMIT_REMOTE_NAME`
@@ -425,8 +425,10 @@ Dependencies: the standard library only, at runtime and in tests. No go-git.
    commit.
 5. If `--remote` is given, check I4, then `git remote add origin <url>`.
 6. Install the inlay pre-push hook in the new git dir.
-7. Regenerate the host block and run `hooks status`; print a reminder if the
-   host hooks are not installed.
+7. Regenerate the host block. Unless `--no-hooks` is given, write the host
+   shim for each hook whose place in the hooks directory is free (section
+   7.3), so the inlay is guarded from its first commit; then print a
+   reminder if a host hook still runs no guard.
 
 `clone` runs steps 1 to 3, then `git fetch origin`, reads the manifest from
 `origin/<branch>` for the remote's default branch, validates every claim
@@ -451,6 +453,15 @@ and a sibling whose own worktree is gone still serves, which is how an
 orphaned inlay's history is recovered.
 
 ### 7.3 Host hooks
+
+`init`, `clone` and `attach` install the part of this that asks nothing of
+the host: the shim for each hook whose place in the hooks directory is free
+or holds an earlier shim, and they say so. A hook manager's
+`core.hooksPath` or a hook of the host's own is left untouched, with no
+config-defined hook beside it either, and the reminder then names
+`hooks install`, which is the user's decision there. `--no-hooks` on any
+of the three declines even the shims. The guards are the safety of the
+tool, so the default is to have them.
 
 `hooks install`, for each of `pre-commit` and `pre-push`:
 
@@ -521,7 +532,8 @@ and falls back to the binary that wrote it, so a GUI client that starts git
 without the user's shell `PATH` still runs the guards. With neither in place
 it fails closed. The inlay's own pre-push shim is rewritten by the
 per-command sync whenever it differs from the current one, so an upgrade of
-git-inlay reaches it; host hooks change only on `hooks install`. The host
+git-inlay reaches it; host hooks change only on `hooks install` and on the
+shims that `init`, `clone` and `attach` place. The host
 hooks directory and the repository config are shared by linked worktrees,
 so one install covers all of them.
 

@@ -34,7 +34,6 @@ git inlay init team --remote git@github.com:me/my-project-team.git
 git inlay claim team .claude/settings.json .claude/skills/internal/ CLAUDE.local.md
 git inlay team commit -m "team settings"
 git inlay team push -u origin main
-git inlay hooks install
 ```
 
 On another machine, or for a teammate:
@@ -42,7 +41,6 @@ On another machine, or for a teammate:
 ```sh
 git clone git@github.com:org/my-project.git && cd my-project
 git inlay clone git@github.com:me/my-project-team.git
-git inlay hooks install
 ```
 
 The files are now in place, the host's `git status` is clean, `git add -A`
@@ -70,8 +68,9 @@ the inlay.
 
 ## Guards
 
-`git inlay hooks install` adds `pre-commit` and `pre-push` shims to the
-host. The first refuses a commit that stages a claimed path (`git add -f`
+`init`, `clone` and `attach` add `pre-commit` and `pre-push` shims to the
+host wherever its hooks directory has room, unless given `--no-hooks`;
+`git inlay hooks install` does the same on request. The first refuses a commit that stages a claimed path (`git add -f`
 is the only way to stage one). The second refuses a push whose commits
 touch a claimed path, which also catches `--no-verify` commits and
 fast-forward merges of such commits. Each inlay carries its own `pre-push`
@@ -79,7 +78,8 @@ guard that refuses a push to any of the host's remotes and a push of files
 outside its claims.
 
 If a hook manager owns `core.hooksPath`, or a hook that git-inlay did not
-write is in the way, `hooks install` on git 2.54 or newer adds the guards
+write is in the way, nothing is installed unasked and a warning says so.
+`hooks install` on git 2.54 or newer adds the guards
 as config-defined hooks (`hook.git-inlay-pre-commit` and
 `hook.git-inlay-pre-push` in `.git/config`), which git runs beside the
 other hooks. On older git it prints the lines to add instead. A GUI client
@@ -147,9 +147,9 @@ and prints the briefing on stdout.
 
 | Command | Does |
 |---|---|
-| `init <name> [--remote <url>]` | create an empty inlay for this worktree |
-| `clone <url> [<name>]` | attach an inlay from its remote |
-| `attach <name>... \| --all` | copy inlays from another worktree of the host |
+| `init <name> [--remote <url>] [--no-hooks]` | create an empty inlay for this worktree |
+| `clone <url> [<name>] [--no-hooks]` | attach an inlay from its remote |
+| `attach <name>... \| --all [--no-hooks]` | copy inlays from another worktree of the host |
 | `detach <name> [--force] [--keep-files]` | remove an inlay from this worktree |
 | `claim <name> <path>...` | give paths to an inlay; end a directory that does not exist yet with `/` |
 | `unclaim <name> <path>...` | take paths back; the files stay on disk |
@@ -159,7 +159,7 @@ and prints the briefing on stdout.
 | `check [--staged]` | verify every invariant |
 | `restore [<name>]` | re-check out tracked inlay files missing from the tree |
 | `prune [--dry-run] [--force]` | remove inlays whose worktree is gone |
-| `hooks install\|uninstall\|status` | manage the host's guards |
+| `hooks install\|uninstall\|status` | manage the host's guards, which `init`, `clone` and `attach` install where they fit |
 | `<name> <git command> [args]` | run git against an inlay |
 
 Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,

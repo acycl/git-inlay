@@ -306,33 +306,55 @@ func WriteShim(path, sub string) error {
 // state that results, read back, so a guard that config read after the
 // repository's still disables shows as such.
 func Install(h *host.Host) (*Report, error) {
+	_, r, err := install(h, true)
+	return r, err
+}
+
+// InstallFree is the part of Install that asks nothing of the host: a
+// shim for each hook whose place in the hooks directory is free, and
+// nothing where a hook manager or a foreign hook stands, not even a
+// config-defined hook beside it. It is what init, clone and attach do
+// unasked, so that a new inlay is guarded from its first commit. It
+// returns the hooks it placed a shim for that had none before.
+func InstallFree(h *host.Host) (placed []string, err error) {
+	placed, _, err = install(h, false)
+	return placed, err
+}
+
+// install is Install, with config-defined hooks only when config is set.
+// It also returns the hooks whose shim it wrote where none was active.
+func install(h *host.Host, config bool) (placed []string, after *Report, err error) {
 	r, err := Statuses(h)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	run := h.Git()
 	local, err := sections(run, true, allSections)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, s := range r.Statuses {
 		switch {
 		case s.slot != "":
 			if err := WriteShim(s.slot, s.Hook); err != nil {
-				return nil, err
+				return nil, nil, err
+			}
+			if s.State != Installed {
+				placed = append(placed, s.Hook)
 			}
 			if len(local[s.Hook]) > 0 {
 				if err := dropSection(run, s.Hook); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
-		case r.Config:
+		case config && r.Config:
 			if err := configure(run, s.Hook, local[s.Hook], s.State != Configured); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
-	return Statuses(h)
+	after, err = Statuses(h)
+	return placed, after, err
 }
 
 // dropSection removes the config-defined hook that a shim in this
