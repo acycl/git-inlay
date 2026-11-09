@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/acycl/git-inlay/internal/atomicfile"
@@ -233,22 +234,57 @@ func readManifest(root string, run gitx.Runner, name string, lenient bool) (*man
 // commit or file yields an empty manifest; any other failure is an error,
 // so a broken inlay never silently loses its claims.
 func ManifestAt(run gitx.Runner, name, rev string) (*manifest.Manifest, error) {
-	// One cat-file --batch call both finds and reads the file: an unborn
-	// HEAD, an unknown rev, or an absent path all answer "missing" rather
-	// than failing, so no probing with rev-parse and ls-tree is needed.
-	obj := rev + ":" + manifest.File(name)
-	out, err := run.OutputWithInput([]byte(obj+"\n"), "cat-file", "--batch")
+	ms, err := ManifestsAt(run, name, []string{rev})
 	if err != nil {
 		return nil, err
 	}
-	header, body, _ := strings.Cut(out, "\n")
-	if strings.HasSuffix(header, " missing") {
-		return manifest.New(name), nil
+	return ms[0], nil
+}
+
+// ManifestsAt is ManifestAt for several revs at the cost of one process.
+func ManifestsAt(run gitx.Runner, name string, revs []string) ([]*manifest.Manifest, error) {
+	if len(revs) == 0 {
+		return nil, nil
 	}
-	if fields := strings.Fields(header); len(fields) == 3 && fields[1] == "blob" {
-		return manifest.Parse(name, []byte(body))
+	// One cat-file --batch call both finds and reads each file: an unborn
+	// HEAD, an unknown rev, or an absent path all answer "missing" rather
+	// than failing, so no probing with rev-parse and ls-tree is needed.
+	var input strings.Builder
+	for _, rev := range revs {
+		input.WriteString(rev + ":" + manifest.File(name) + "\n")
 	}
-	return nil, fmt.Errorf("%s: cat-file answered %q, not a blob", obj, header)
+	out, err := run.OutputWithInput([]byte(input.String()), "cat-file", "--batch")
+	if err != nil {
+		return nil, err
+	}
+	ms := make([]*manifest.Manifest, len(revs))
+	for i, rev := range revs {
+		// Each answer is a header line, then for a blob its bytes and a
+		// newline.
+		header, rest, _ := strings.Cut(out, "\n")
+		out = rest
+		if strings.HasSuffix(header, " missing") {
+			ms[i] = manifest.New(name)
+			continue
+		}
+		fields := strings.Fields(header)
+		if len(fields) != 3 || fields[1] != "blob" {
+			return nil, fmt.Errorf("%s:%s: cat-file answered %q, not a blob", rev, manifest.File(name), header)
+		}
+		// The runner trims the newlines that end the output, which those
+		// that end the last blob are among, however many it has; a blob
+		// before the last is whole.
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || (size > len(out) && i != len(revs)-1) {
+			return nil, fmt.Errorf("%s:%s: cat-file answered %q", rev, manifest.File(name), header)
+		}
+		size = min(size, len(out))
+		if ms[i], err = manifest.Parse(name, []byte(out[:size])); err != nil {
+			return nil, err
+		}
+		out = strings.TrimPrefix(out[size:], "\n")
+	}
+	return ms, nil
 }
 
 // WriteManifest writes m to the working tree and stages it in the inlay.

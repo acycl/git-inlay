@@ -1956,6 +1956,60 @@ func TestInlayPushAfterUnclaim(t *testing.T) {
 	f.inlayOK(f.root, "claude", "push", "-q", "second", "main")
 }
 
+// A file the inlay took from outside its claims, the host's here, must not
+// reach the inlay's remote even in a commit that a later one undoes: no
+// manifest ever covered it, at that commit or at the tip.
+func TestInlayPushRefusesStrayInHistory(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("claude-private")
+	f.inlayOK(f.root, "init", "claude", "--remote", private)
+	f.inlayOK(f.root, "claude", "push", "-q", "-u", "origin", "main")
+
+	_, errOut, _ := f.inlay(f.root, "claude", "add", "-f", "README.md")
+	contains(t, errOut, "inlay claude now tracks 1 path(s) outside its claims", "add -f of a host file")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "stray")
+	_, errOut, code := f.inlay(f.root, "claude", "push", "-q")
+	if code == 0 {
+		t.Fatal("push of a tip that tracks a host file succeeded")
+	}
+	contains(t, errOut, "README.md: is in the tree being pushed but under no claim", "push with the stray at the tip")
+
+	// The fix the refusal names for the tip leaves the commit behind.
+	f.inlayOK(f.root, "claude", "rm", "-q", "--cached", "--", ":(top,literal)README.md")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "drop the stray")
+	_, errOut, code = f.inlay(f.root, "claude", "push", "-q")
+	if code == 0 {
+		t.Fatal("push of history that carries a host file succeeded")
+	}
+	contains(t, errOut, "README.md: is in commit ", "push with the stray in history")
+	contains(t, errOut, "under no claim of inlay claude, then or now", "push with the stray in history")
+
+	// With the commits gone, the push passes.
+	f.inlayOK(f.root, "claude", "reset", "-q", "--soft", "origin/main")
+	f.inlayOK(f.root, "claude", "push", "-q")
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status = %q", got)
+	}
+
+	// Nor does a side branch hide it, where the stray came and went before
+	// the merge, whatever the user's log settings.
+	f.inlayOK(f.root, "claude", "config", "log.diffMerges", "off")
+	f.inlayOK(f.root, "claude", "checkout", "-q", "-b", "side")
+	f.inlay(f.root, "claude", "add", "-f", "README.md")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "stray on a side branch")
+	f.inlayOK(f.root, "claude", "rm", "-q", "--cached", "--", ":(top,literal)README.md")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "drop it")
+	f.inlayOK(f.root, "claude", "checkout", "-q", "main")
+	f.inlayOK(f.root, "claude", "commit", "-q", "--allow-empty", "-m", "main moves on")
+	f.inlayOK(f.root, "claude", "merge", "-q", "--no-ff", "-m", "merge side", "side")
+	_, errOut, code = f.inlay(f.root, "claude", "push", "-q")
+	if code == 0 {
+		t.Fatal("push of a merged side branch that carried a host file succeeded")
+	}
+	contains(t, errOut, "README.md: is in commit ", "push with the stray on a merged side branch")
+}
+
 // Moving the host checkout leaves the inlays' absolute paths stale; the
 // next command repairs them, so the inlay's push guard still finds its host.
 func TestMovedCheckoutRepairsInlayConfig(t *testing.T) {

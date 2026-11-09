@@ -243,8 +243,7 @@ func Containment(in *inlay.Inlay, m *manifest.Manifest) ([]Violation, error) {
 // under no claim of the manifest inlay name has committed there (I3). That
 // tree and that manifest are what the receiving side gets and what a clone
 // of it enforces, whatever an uncommitted edit of the working-tree manifest
-// says. Only the tip counts: a path that an earlier commit carried under a
-// claim since dropped publishes nothing a clone would check out.
+// says. OutgoingStrays judges the commits on the way to that tip.
 func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 	m, err := inlay.ManifestAt(run, name, rev)
 	if err != nil {
@@ -266,6 +265,119 @@ func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 		}
 	}
 	return out, nil
+}
+
+// OutgoingStrays finds paths in the commits update u would publish from
+// the inlay name that no claim covered: the manifest at the tip does not
+// own them, and neither did the manifest committed with an outgoing commit
+// that holds them. A path under a claim since dropped passes by the second
+// test, and one committed ahead of the manifest that claims it by the
+// first. What is left is a file the inlay took from outside its claims,
+// most likely the host's, which must not reach the inlay's remote even in
+// a commit that a later one undoes.
+//
+// The common case, every path owned at the tip, costs what listing the
+// paths costs. Paths in doubt cost three more processes, however many
+// there are, all plumbing, so that no log configuration of the user's
+// changes what is found: the outgoing commits that touch any of them, in
+// which of those each exists as a file, and those commits' manifests.
+func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string, named bool) ([]Violation, error) {
+	tip, err := inlay.ManifestAt(run, name, u.LocalOID)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := OutgoingPaths(run, []RefUpdate{u}, remoteName, named)
+	if err != nil {
+		return nil, err
+	}
+	stray := func(p, where string) Violation {
+		return Violation{
+			Path:   p,
+			Inlay:  name,
+			Reason: fmt.Sprintf("is in %s, which is being pushed, under no claim of inlay %s, then or now", where, name),
+			Fix:    fmt.Sprintf("remove it from the commits being pushed, for example with git inlay %s rebase -i, or claim it and commit", name),
+		}
+	}
+	var out []Violation
+	var doubtful []string
+	for _, p := range paths {
+		switch _, ok := tip.Owner(p); {
+		case ok:
+		case strings.Contains(p, "\n"):
+			// No claim can hold a line break, so no manifest ever owned it,
+			// and the line-based queries below could not name it.
+			out = append(out, stray(p, "a commit"))
+		default:
+			doubtful = append(doubtful, p)
+		}
+	}
+	if len(doubtful) == 0 {
+		return out, nil
+	}
+	// --full-history: the default simplification drops a side branch that
+	// added a path and removed it again before it was merged.
+	var specs strings.Builder
+	specs.WriteString("--\n")
+	for _, p := range doubtful {
+		specs.WriteString(":(literal)" + p + "\n")
+	}
+	args := append([]string{"rev-list", "--full-history", "--stdin"}, outgoingRange(run, u, remoteName, named)...)
+	listed, err := run.OutputWithInput([]byte(specs.String()), args...)
+	if err != nil {
+		return nil, err
+	}
+	if listed == "" {
+		return out, nil
+	}
+	commits := strings.Split(listed, "\n")
+	manifests, err := inlay.ManifestsAt(run, name, commits)
+	if err != nil {
+		return nil, err
+	}
+	// A commit that removes the path, or holds a directory there, does not
+	// publish it as a file; only one that holds it must have claimed it.
+	var query strings.Builder
+	for _, c := range commits {
+		for _, p := range doubtful {
+			query.WriteString(c + ":" + p + "\n")
+		}
+	}
+	answers, err := run.OutputWithInput([]byte(query.String()), "cat-file", "--batch-check")
+	if err != nil {
+		return nil, err
+	}
+	held := strings.Split(answers, "\n")
+	if len(held) != len(commits)*len(doubtful) {
+		return nil, fmt.Errorf("git cat-file --batch-check answered %d of %d queries", len(held), len(commits)*len(doubtful))
+	}
+	reported := map[string]bool{}
+	for i, c := range commits {
+		for j, p := range doubtful {
+			answer := held[i*len(doubtful)+j]
+			if reported[p] || strings.HasSuffix(answer, " missing") || strings.Contains(answer, " tree ") {
+				continue
+			}
+			if _, ok := manifests[i].Owner(p); !ok {
+				reported[p] = true
+				out = append(out, stray(p, fmt.Sprintf("commit %.7s", c)))
+			}
+		}
+	}
+	return out, nil
+}
+
+// outgoingRange returns the revision arguments that select the commits an
+// update would publish, as revList chooses them.
+func outgoingRange(run gitx.Runner, u RefUpdate, remoteName string, named bool) []string {
+	if !IsZero(u.RemoteOID) && run.Run("cat-file", "-e", u.RemoteOID+"^{commit}") == nil {
+		return []string{u.LocalOID, "--not", u.RemoteOID}
+	}
+	// The remote's object is unknown locally, or there is none; fall back
+	// to the remote's refs.
+	if named {
+		return []string{u.LocalOID, "--not", "--remotes=" + remoteName}
+	}
+	return []string{u.LocalOID}
 }
 
 // RemoteConflicts finds inlay remotes that resolve to a host remote (I4).
