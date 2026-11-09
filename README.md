@@ -31,7 +31,7 @@ from a GUI client that does not see your shell's `PATH` are still guarded.
 ```sh
 cd my-project
 git inlay init team --remote git@github.com:me/my-project-team.git
-git inlay claim team .claude/settings.json .claude/skills/internal CLAUDE.local.md
+git inlay claim team .claude/settings.json .claude/skills/internal/ CLAUDE.local.md
 git inlay team commit -m "team settings"
 git inlay team push -u origin main
 git inlay hooks install
@@ -151,7 +151,7 @@ and prints the briefing on stdout.
 | `clone <url> [<name>]` | attach an inlay from its remote |
 | `attach <name>... \| --all` | copy inlays from another worktree of the host |
 | `detach <name> [--force] [--keep-files]` | remove an inlay from this worktree |
-| `claim <name> <path>...` | give paths to an inlay |
+| `claim <name> <path>...` | give paths to an inlay; end a directory that does not exist yet with `/` |
 | `unclaim <name> <path>...` | take paths back; the files stay on disk |
 | `ls [<name>] [--porcelain]` | list claims |
 | `which <path>...` | report who owns each path: an inlay, `host`, or `none` |

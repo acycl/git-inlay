@@ -295,6 +295,33 @@ func TestClaimRefusals(t *testing.T) {
 	contains(t, f.inlayOK(f.root, "check"), "ok: 2 inlay(s), 1 claim(s)", "check")
 }
 
+// A claim's kind is fixed when it is made, so a path claimed before it
+// exists is a file claim, with a warning, and check reports it once the
+// path turns out to be a directory; claiming it again changes the kind.
+func TestClaimKindFollowsDisk(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.inlayOK(f.root, "hooks", "install")
+	_, errOut, code := f.inlay(f.root, "claim", "claude", ".claude/skills/internal", "later/")
+	if code != 0 || !strings.Contains(errOut, ".claude/skills/internal does not exist yet and is claimed as a file") {
+		t.Fatalf("claim of a missing path: exit %d, stderr %q", code, errOut)
+	}
+	if strings.Contains(errOut, "later") {
+		t.Fatalf("a trailing slash still drew the warning: %q", errOut)
+	}
+	f.write(".claude/skills/internal/x.md", "x\n")
+	contains(t, f.inlayFails(f.root, 1, "check"), ".claude/skills/internal: is claimed as a file but is a directory", "check on a file claim that is a directory")
+	contains(t, f.inlayOK(f.root, "which", ".claude/skills/internal/x.md"), "\tnone", "which before the claim is fixed")
+
+	_, errOut, code = f.inlay(f.root, "claim", "claude", ".claude/skills/internal")
+	if code != 0 || !strings.Contains(errOut, "now covers the earlier claim") {
+		t.Fatalf("claiming the directory again: exit %d, stderr %q", code, errOut)
+	}
+	contains(t, f.inlayOK(f.root, "which", ".claude/skills/internal/x.md"), "\tclaude", "which after the claim is fixed")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after the claim is fixed")
+}
+
 // Scenario 10: passthrough runs git against the inlay and refuses bad names.
 func TestPassthrough(t *testing.T) {
 	t.Parallel()

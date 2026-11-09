@@ -112,7 +112,12 @@ packages/foo/.claude/
 Claim validation, applied by `claim` and when reading a manifest:
 
 - root-relative, forward slashes, no leading `/`, no `.` or `..` segments
-- directories end with `/`, files do not; the filesystem is checked at claim time
+- directories end with `/`, files do not; the filesystem is checked at claim
+  time, and a path that does not exist yet is a file unless it is given a
+  trailing slash, which `claim` says in a warning. The kind then stays as
+  recorded, so `check` reports a claim whose kind the disk has come to
+  contradict (a file claim on a directory owns none of the files in it),
+  and claiming the path again changes the kind
 - no newline or carriage return, no leading `#`, no leading or trailing space
 - not under `.git/`, `.git-inlay/`, or inside a submodule of the host
 - not equal to or under a path the host tracks (section 6, I1)

@@ -94,14 +94,18 @@ func (c *cli) claim(args []string) error {
 	}
 	m := e.Manifest
 	claims := make([]manifest.Claim, 0, len(paths))
+	var guessed []manifest.Claim
 	var resolveErr error
 	for _, p := range paths {
-		cl, err := s.resolveClaim(p)
+		cl, guess, err := s.resolveClaim(p)
 		if err != nil {
 			resolveErr = err
 			break
 		}
 		claims = append(claims, cl)
+		if guess {
+			guessed = append(guessed, cl)
+		}
 	}
 	// Report the first path that fails, whether resolving or vetting.
 	if err := s.vet(name, claims); err != nil {
@@ -157,6 +161,11 @@ func (c *cli) claim(args []string) error {
 		c.printf("claimed %s for inlay %s\n", cl, name)
 	}
 	c.printf("staged %d file(s) in inlay %s; commit with: git inlay %s commit -m \"...\"\n", len(files), name, name)
+	for _, cl := range added {
+		if slices.Contains(guessed, cl) {
+			c.warnf("%s does not exist yet and is claimed as a file; if it is to be a directory, claim it with a trailing slash: git inlay claim %s %q", cl, name, cl.Path+"/")
+		}
+	}
 	s.warnIgnored(e.Inlay, added)
 	s.warnHistory(added)
 	return nil
@@ -344,6 +353,7 @@ func (c *cli) check(args []string) error {
 				return err
 			}
 			vs = append(vs, cv...)
+			vs = append(vs, s.kindViolations(e)...)
 			rs, err := e.Inlay.Remotes()
 			if err != nil {
 				return err
