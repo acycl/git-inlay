@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -37,6 +38,19 @@ var scrubbed = map[string]bool{
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
 	"GIT_COMMON_DIR":                   true,
 	"GIT_NAMESPACE":                    true,
+}
+
+// pathspecModes lists the variables that change how git reads every
+// pathspec. They are removed from the commands git-inlay runs for its own
+// consumption, whose pathspecs carry their own magic: GIT_LITERAL_PATHSPECS,
+// which Magit sets, would turn ":(literal)README.md" into a file of that
+// name, so a host-tracked path would look untracked. Passthrough keeps
+// them, since there the pathspecs are the user's.
+var pathspecModes = map[string]bool{
+	"GIT_LITERAL_PATHSPECS": true,
+	"GIT_GLOB_PATHSPECS":    true,
+	"GIT_NOGLOB_PATHSPECS":  true,
+	"GIT_ICASE_PATHSPECS":   true,
 }
 
 // Error reports a failed git command together with what it printed.
@@ -225,10 +239,15 @@ func (r Runner) Passthrough(stdin io.Reader, stdout, stderr io.Writer, args ...s
 	return 0, nil
 }
 
-// capture runs git for machine consumption: LC_ALL=C for stable output and
-// stderr collected into the error.
+// capture runs git for machine consumption: LC_ALL=C for stable output, the
+// pathspec modes of the environment removed, and stderr collected into the
+// error.
 func (r Runner) capture(stdin []byte, args []string) ([]byte, error) {
 	cmd := r.Command(args...)
+	cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool {
+		key, _, _ := strings.Cut(kv, "=")
+		return pathspecModes[key]
+	})
 	cmd.Env = append(cmd.Env, "LC_ALL=C")
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)

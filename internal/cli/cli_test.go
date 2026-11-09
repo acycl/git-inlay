@@ -273,6 +273,11 @@ func TestClaimRefusals(t *testing.T) {
 
 	contains(t, f.inlayFails(f.root, 1, "claim", "team", "README.md"), "tracked by the host", "claiming a tracked file")
 	contains(t, f.inlayFails(f.root, 1, "claim", "team", "docs"), "tracked by the host", "claiming a tracked directory")
+	// Magit exports GIT_LITERAL_PATHSPECS, which would turn the literal
+	// pathspec that asks the host into a file name that matches nothing.
+	if _, errOut, code := f.runWith(f.root, []string{"GIT_LITERAL_PATHSPECS=1"}, "git", "inlay", "claim", "team", "README.md"); code != 1 || !strings.Contains(errOut, "tracked by the host") {
+		t.Fatalf("claim of a tracked file under GIT_LITERAL_PATHSPECS: exit %d, stderr %q", code, errOut)
+	}
 	// Claims are vetted as a batch, but the first path that fails still
 	// decides the error.
 	contains(t, f.inlayFails(f.root, 1, "claim", "team", "fresh/", "README.md", "../outside"), "README.md is tracked by the host", "first failure in a batch")

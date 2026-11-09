@@ -374,7 +374,12 @@ would let `git add -A` see claimed paths.
 every command as `git --git-dir=<abs> --work-tree=<abs> ...`, sets `LC_ALL=C`,
 and removes `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
 `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`
-and `GIT_NAMESPACE` from the environment. It offers `Run`, `Output`, and
+and `GIT_NAMESPACE` from the environment. The commands it runs for its own
+consumption also lose `GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`,
+`GIT_NOGLOB_PATHSPECS` and `GIT_ICASE_PATHSPECS`, since their pathspecs
+carry their own magic and the first of those, which Magit sets, would
+make a host-tracked path look untracked; passthrough keeps them, the
+pathspecs there being the user's. It offers `Run`, `Output`, and
 `OutputZ` (NUL-separated lines) and wraps failures with the command line and
 stderr. Passthrough uses the same runner with stdin, stdout, and stderr
 connected to the terminal.
