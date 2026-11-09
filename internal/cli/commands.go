@@ -312,16 +312,23 @@ func (c *cli) which(args []string) error {
 func (c *cli) check(args []string) error {
 	fs := c.flagSet("check")
 	staged := fs.Bool("staged", false, "check only the host's staged paths")
+	fix := fs.Bool("fix", false, "regenerate the exclude files and repair the inlays' config first")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) > 0 {
-		return usagef("usage: git inlay check [--staged]")
+		return usagef("usage: git inlay check [--staged] [--fix]")
 	}
 	// Read only: check reports what is on disk rather than repairing it
-	// first, and works on a read-only .git.
-	s, err := c.load()
+	// first, and works on a read-only .git. With --fix it runs the sync
+	// step first, as every other verb does, which regenerates the exclude
+	// files and repairs the inlays' config, and then reports what is left.
+	open := c.load
+	if *fix {
+		open = c.open
+	}
+	s, err := open()
 	if err != nil {
 		return err
 	}

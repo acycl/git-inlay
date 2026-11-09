@@ -888,13 +888,16 @@ func TestCheckReportsStaleExcludes(t *testing.T) {
 	if strings.Contains(errOut, "is not ignored by the host") {
 		t.Fatal("check judged I2 against a stale block")
 	}
-	contains(t, errOut, "fix: run a git inlay command other than check", "check with a stale block")
+	contains(t, errOut, "fix: git inlay check --fix", "check with a stale block")
 	if f.read(".git/info/exclude") != edited || f.read(inlayExclude) != "/*\n" {
 		t.Fatal("check rewrote an exclude file")
 	}
 
-	f.inlayOK(f.root, "ls")
-	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after ls")
+	contains(t, f.inlayOK(f.root, "check", "--fix"), "ok:", "check --fix")
+	if f.read(".git/info/exclude") != block {
+		t.Fatal("check --fix did not regenerate the managed block")
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after check --fix")
 }
 
 // An interrupted clone leaves its staging directory, which no verb takes

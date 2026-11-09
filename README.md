@@ -156,7 +156,7 @@ and prints the briefing on stdout.
 | `ls [<name>] [--porcelain]` | list claims |
 | `which <path>...` | report who owns each path: an inlay, `host`, or `none` |
 | `status [--fetch] [--porcelain]` | per inlay: branch, ahead/behind, changed and untracked counts |
-| `check [--staged]` | verify every invariant |
+| `check [--staged] [--fix]` | verify every invariant; `--fix` first regenerates the exclude files and repairs the inlays' config |
 | `restore [<name>]` | re-check out tracked inlay files missing from the tree |
 | `prune [--dry-run] [--force]` | remove inlays whose worktree is gone |
 | `hooks install\|uninstall\|status` | manage the host's guards, which `init`, `clone` and `attach` install where they fit |

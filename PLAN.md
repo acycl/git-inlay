@@ -216,7 +216,7 @@ command line are relative to the current directory and are normalized against
 | `git inlay ls [<name>]` | list claims, per inlay |
 | `git inlay which <path>...` | report the owner of each path: host, an inlay, or none |
 | `git inlay status [--fetch]` | short status of every inlay in this worktree, plus ahead/behind |
-| `git inlay check [--staged]` | run every invariant from section 6; non-zero exit on any violation |
+| `git inlay check [--staged] [--fix]` | run every invariant from section 6; non-zero exit on any violation; `--fix` runs the sync step first, so what it repairs (stale exclude files, an inlay config that no longer names this host) is not reported |
 | `git inlay restore [<name>]` | re-check out tracked inlay files that are missing from the tree, for example after `git clean -x` |
 | `git inlay prune [--dry-run] [--force]` | delete inlay git dirs whose host worktree no longer exists; those with commits on no remote are kept, with the push command that clears them, unless forced |
 | `git inlay hooks install\|uninstall\|status` | manage the host's guards (section 7.3) |
@@ -265,9 +265,11 @@ tree before checkout; a pull cannot be vetted in advance, so the warning
 is what tells the user to look at the host's `git status`. The hook
 family and `check` read manifests but do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
-managed block, or an inlay's stale `info/exclude`) as a violation fixed
-by any command that runs the sync step, so it can see a hand edit and runs on a read-only
-`.git`.
+managed block, or an inlay's stale `info/exclude`) as a violation, so it can see a hand edit and runs on a read-only
+`.git`. `check --fix` is the named way to repair it: it runs the sync
+step first and reports what remains. Any other verb repairs it too, as
+a side effect, but a fix that reads "run `git inlay ls`" explains
+nothing.
 
 For inlays attached in other worktrees, the manifest is read from that
 worktree's tree, as for the current one, so a claim staged there but not

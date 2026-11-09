@@ -84,7 +84,7 @@ live inside this repository's working tree.
   ls [<name>] [--porcelain]               list claims
   which <path>...                         report who owns each path
   status [--fetch] [--porcelain]          short status of every inlay here
-  check [--staged]                        verify every invariant
+  check [--staged] [--fix]                verify every invariant
   restore [<name>]                        re-check out missing inlay files
   prune [--dry-run] [--force]             remove inlays whose worktree is gone
   hooks install|uninstall|status          manage the host's leak guards
@@ -351,7 +351,7 @@ func (s *session) refresh() error {
 // would write, for check, which does not run it: the host's managed block,
 // whether it is stale, and each attached inlay's info/exclude.
 func (s *session) staleExcludes() (vs []guard.Violation, hostStale bool, err error) {
-	fix := "run a git inlay command other than check to regenerate it, for example git inlay ls, then check again"
+	fix := "git inlay check --fix"
 	current, err := exclude.HostCurrent(s.host.ExcludeFile(), guard.Union(s.entries))
 	if err != nil {
 		return nil, false, err
