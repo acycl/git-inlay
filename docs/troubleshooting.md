@@ -50,6 +50,13 @@ side every host file is an ignored file, so these would act on the whole
 tree. Use `git inlay <name> clean -fd` or a plain `git inlay <name>
 stash`, or run the command in the host.
 
+If the message says the command would take `host file(s) the inlay does
+not ignore`, a host `.gitignore` re-includes those files (`!.env.example`),
+which outranks the inlay's exclude file, so `clean` and `stash -u` would
+reach them. Remove the inlay's own untracked files by hand, or run the
+command the refusal prints once you have checked what it would take with
+`git inlay <name> clean -n`.
+
 ### `<path> is tracked by the host`
 
 A path the host tracks cannot be claimed. See
@@ -115,7 +122,9 @@ Each path comes with its fix.
 - Claims are explicit files or directories. There are no globs.
 - A host `.gitignore` outranks the managed exclude block. A pattern that
   re-includes a claimed path cannot be overridden, so such a claim is
-  refused.
+  refused. A pattern that re-includes a host file shows that file to an
+  inlay as untracked; `check` warns, and the inlay's `clean` and
+  `stash -u` are refused while such files exist.
 - The user's global excludes apply to inlays as to any repository.
 - Checking out host history that tracked a now-claimed path overwrites the
   inlay's copy of the file. `git inlay <name> checkout -- <path>` restores

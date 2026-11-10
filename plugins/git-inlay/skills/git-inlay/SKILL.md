@@ -117,7 +117,11 @@ it. Never get past a guard with `--no-verify` or `git add -f`.
 - `refusing to run git clean -x against inlay <name>` (or `-X`, or
   `stash --all`): from an inlay's side every host file is an ignored file,
   so these would act on the whole tree. `git inlay <name> clean -fd` and a
-  plain `git inlay <name> stash` stay within the inlay's claims.
+  plain `git inlay <name> stash` stay within the inlay's claims. If the
+  refusal instead names `host file(s) the inlay does not ignore`, a host
+  `.gitignore` re-includes them; they are the host's, so never add them
+  to the inlay, and do not run the override the refusal prints without
+  the user's say.
 
 Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,
 3 git failed. `git inlay <name> <git command>` exits with git's own status.

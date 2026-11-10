@@ -836,7 +836,13 @@ archives carry `LICENSE` (Apache-2.0).
   status; tracked files are unaffected. `claim` stages with `-f` after
   applying the inlay's own rules and the global excludes itself, and warns.
   `clone` checks for collisions before checkout, because git overwrites
-  ignored files silently.
+  ignored files silently. In the other direction, a host pattern that
+  re-includes a host file (`!.env.example`) shows it to the inlay as
+  untracked when it lies at the root or directly inside a directory the
+  negation chain re-includes. Nothing can outrank that, so `check` warns,
+  `detach` does not count such files as the inlay's work, and the
+  passthrough refuses `clean` (unless a dry run) and `stash -u` while any
+  exist.
 - **Host checkouts of history that tracked a claimed path** overwrite the
   inlay's files with the host's copy, because the path is ignored by the
   host. `claim` warns when the path appears anywhere in the host's history.

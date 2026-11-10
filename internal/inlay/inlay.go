@@ -332,6 +332,12 @@ func (i *Inlay) RemoteNames() ([]string, error) { return i.Git().Lines("remote")
 // Tracked returns every path the inlay tracks.
 func (i *Inlay) Tracked() ([]string, error) { return i.Git().OutputZ("ls-files", "-z") }
 
+// Untracked returns the files in the tree that the inlay neither tracks
+// nor ignores, which are what git clean and git stash -u act on.
+func (i *Inlay) Untracked() ([]string, error) {
+	return i.Git().OutputZ("ls-files", "-z", "--others", "--exclude-standard")
+}
+
 // Entry is an inlay attached to any worktree of the host, with its manifest.
 type Entry struct {
 	Key      string

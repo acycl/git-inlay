@@ -401,6 +401,14 @@ func (c *cli) check(args []string) error {
 			}
 			vs = append(vs, cv...)
 			vs = append(vs, s.kindViolations(e)...)
+			// Nothing in git-inlay's hands fixes this, so it is a warning
+			// and not a problem that fails the check.
+			if _, exposed, err := untracked(e); err != nil {
+				return err
+			} else if len(exposed) > 0 {
+				c.warnf("inlay %s does not ignore %d host file(s) (%s): a .gitignore pattern re-includes them and outranks the inlay's exclude file. They show as untracked in git inlay %s status; keep them out of git inlay %s add, and expect clean and stash -u to be refused",
+					e.Name, len(exposed), summarize(exposed), e.Name, e.Name)
+			}
 			rs, err := e.Inlay.Remotes()
 			if err != nil {
 				return err
@@ -736,6 +744,16 @@ func (c *cli) passthrough(name string, args []string) error {
 		return fmt.Errorf("refusing to run %s against inlay %s: it would %s every file the inlay ignores, which is the whole host tree; run it in the host instead, or deliberately with: git --git-dir=%s --work-tree=%s %s",
 			what, name, verb, e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
 	}
+	if verb, ok := untrackedWide(expanded); ok {
+		_, exposed, err := untracked(e)
+		if err != nil {
+			return err
+		}
+		if len(exposed) > 0 {
+			return fmt.Errorf("refusing to run git %s against inlay %s: it would %s %d host file(s) the inlay does not ignore (%s), because a .gitignore pattern re-includes them and outranks the inlay's exclude file; run it deliberately with: git --git-dir=%s --work-tree=%s %s",
+				strings.Join(args, " "), name, verb, len(exposed), summarize(exposed), e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
+		}
+	}
 	before := e.Manifest.Claims
 	tracked, listed := trackedPaths(e)
 	code, killed, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
@@ -819,7 +837,8 @@ func (s *session) warnNewStrays(e inlay.Entry, before map[string]bool) {
 
 // treeWide recognizes the passthrough forms that act on ignored files, and
 // says what they would do to them. From the inlay's side everything outside
-// its claims is ignored, so git clean -x would delete the whole host tree,
+// its claims is ignored, bar what untrackedWide is for, so git clean -x
+// would delete the whole host tree,
 // git clean -e '!pattern' could un-ignore it, and git stash --all would
 // stash it.
 func treeWide(args []string) (verb string, ok bool) {
@@ -832,6 +851,35 @@ func treeWide(args []string) (verb string, ok bool) {
 		return "remove", cleanTreeWide(args[i+1:])
 	case "stash":
 		return "stash", stashTreeWide(args[i+1:])
+	}
+	return "", false
+}
+
+// untrackedWide recognizes the passthrough forms that act on every
+// untracked file, and says what they would do to them: a clean that is not
+// a dry run, and a stash that includes untracked files. They are safe as
+// long as the inlay's untracked files are all its own, which passthrough
+// verifies (see untracked).
+func untrackedWide(args []string) (verb string, ok bool) {
+	i := gitSubcommand(args)
+	if i < 0 {
+		return "", false
+	}
+	switch args[i] {
+	case "clean":
+		opts, _ := gitArgs(args[i+1:], "e", "--exclude")
+		dry := slices.ContainsFunc(opts, func(o gitOption) bool {
+			return o.name == "n" || abbreviates(o.name, "--dry-run")
+		})
+		return "remove", !dry
+	case "stash":
+		opts, pos := gitArgs(args[i+1:], "m", "--message")
+		if len(pos) > 0 && pos[0] != "push" && pos[0] != "save" {
+			return "", false
+		}
+		return "stash", slices.ContainsFunc(opts, func(o gitOption) bool {
+			return o.name == "u" || abbreviates(o.name, "--include-untracked")
+		})
 	}
 	return "", false
 }

@@ -144,7 +144,7 @@ or without a trailing `.git`, and git's `insteadOf` rewrites are applied.
 ## Other ignore rules
 
 Git's ignore sources have a fixed precedence: `.gitignore` files outrank
-`info/exclude`, which outranks the user's global excludes file. Two
+`info/exclude`, which outranks the user's global excludes file. Three
 consequences:
 
 - **A host `.gitignore` that already ignores a claimed path** hides new
@@ -153,6 +153,12 @@ consequences:
   `git inlay <name> add -f <path>`.
 - **A host `.gitignore` that re-includes a claimed path** (`!.claude`)
   cannot be overridden by the managed block, so such a claim is refused.
+- **A host `.gitignore` that re-includes a host file** (`!.env.example`)
+  outranks the inlay's exclude file too, so the inlay sees that file as
+  untracked when it sits at the root of the tree or directly inside a
+  directory that leads to a claim. `git inlay check` warns about such
+  files. Keep them out of `git inlay <name> add`; `git inlay <name> clean`
+  and `stash -u`, which would take them, are refused while any exist.
 
 The user's global excludes apply to an inlay as to any repository. That is
 what keeps Claude Code's `settings.local.json` out of a team inlay; it is

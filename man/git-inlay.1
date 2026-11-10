@@ -108,8 +108,10 @@ creates and checks out.
 <name> <git command> [<args>...]
 Run any git command against an inlay, in the current directory.
 \fBclean \-x\fR, \fBclean \-X\fR and \fBstash \-\-all\fR are refused:
-to an inlay the whole host tree is ignored files. The exit status is
-git's own.
+to an inlay the whole host tree is ignored files. \fBclean\fR and
+\fBstash \-u\fR are refused while the inlay sees host files as
+untracked, which a \fB.gitignore\fR pattern that re\-includes them
+causes. The exit status is git's own.
 .TP
 \fBversion\fR
 Print the version of git\-inlay and of git.

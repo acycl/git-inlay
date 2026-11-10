@@ -601,3 +601,38 @@ func TestExcludeMatchesNonUTF8Bytes(t *testing.T) {
 		t.Fatal("a pattern with U+FFFD in place of the byte ignores the file")
 	}
 }
+
+// TestHostNegationExposesHostFilesToInlay pins the limit of the inlay's
+// exclude file: a .gitignore in the tree outranks info/exclude, so a host
+// pattern that re-includes a path makes the inlay see that host file as
+// untracked, where git clean reaches it. That holds for a file at the root
+// and for one directly inside a directory the negation chain re-includes
+// on the way to a claim; a deeper host file stays hidden behind its
+// excluded parent.
+func TestHostNegationExposesHostFilesToInlay(t *testing.T) {
+	h := newHost(t)
+	ov := h.newInlay(t, "claude", "/*\n!/docs/\n/docs/*\n!/docs/research/\n")
+	h.exclude(t, "/docs/research\n")
+	h.write(t, ".gitignore", "*.cfg\n!sample.cfg\n")
+	h.write(t, "sample.cfg", "KEY=\n")
+	h.write(t, "docs/.gitignore", "!keep.md\n")
+	h.write(t, "docs/keep.md", "x\n")
+	h.write(t, "src/.gitignore", "!deep.md\n")
+	h.write(t, "src/deep.md", "x\n")
+	h.write(t, "docs/research/notes.md", "n\n")
+
+	want := "docs/keep.md\ndocs/research/notes.md\nsample.cfg"
+	if got := ov.git(t, "ls-files", "--others", "--exclude-standard"); got != want {
+		t.Fatalf("inlay untracked files =\n%s\nwant\n%s", got, want)
+	}
+
+	ov.git(t, "clean", "-fdq")
+	for _, p := range []string{"sample.cfg", "docs/keep.md"} {
+		if _, err := os.Stat(filepath.Join(h.root, filepath.FromSlash(p))); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("after the inlay's clean -fd, %s stat error = %v, want not exist", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.root, "src", "deep.md")); err != nil {
+		t.Errorf("the inlay's clean -fd reached a host file behind an excluded directory: %v", err)
+	}
+}

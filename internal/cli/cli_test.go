@@ -1896,6 +1896,56 @@ func TestPassthroughRefusesTreeWideForms(t *testing.T) {
 	}
 }
 
+// A host .gitignore that re-includes a path outranks the inlay's exclude
+// file, so the inlay sees that host file as untracked. clean and stash -u
+// would take it, and are refused; check warns; detach does not count it as
+// the inlay's uncommitted work.
+func TestExposedHostFiles(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write(".gitignore", "*.cfg\n!sample.cfg\n")
+	f.write("sample.cfg", "KEY=\n")
+	f.git(f.root, "add", ".gitignore")
+	f.git(f.root, "commit", "-q", "-m", "ignore config files")
+	f.inlayOK(f.root, "init", "team")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "team", "notes")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
+	f.inlayOK(f.root, "hooks", "install")
+
+	if got := f.inlayOK(f.root, "team", "status", "--porcelain"); got != "?? sample.cfg" {
+		t.Fatalf("inlay status = %q, want the exposed host file", got)
+	}
+	for _, args := range [][]string{
+		{"clean", "-fd"}, {"clean", "-f", "--", "notes"}, {"stash", "-u"}, {"stash", "push", "--include-untracked"},
+	} {
+		errOut := f.inlayFails(f.root, 1, append([]string{"team"}, args...)...)
+		contains(t, errOut, "1 host file(s) the inlay does not ignore (sample.cfg)", "refusal of "+strings.Join(args, " "))
+	}
+	if !f.exists("sample.cfg") {
+		t.Fatal("a refused command removed the host file")
+	}
+	f.inlayOK(f.root, "team", "clean", "-fdn")
+	f.inlayOK(f.root, "team", "stash")
+
+	_, errOut, code := f.inlay(f.root, "check")
+	if code != 0 {
+		t.Fatalf("check: exit %d\n%s", code, errOut)
+	}
+	contains(t, errOut, "inlay team does not ignore 1 host file(s) (sample.cfg)", "check warning")
+
+	// An untracked file of the inlay's own still stops detach; the host
+	// file does not.
+	f.write("notes/b.md", "b\n")
+	contains(t, f.inlayFails(f.root, 1, "detach", "team"), "uncommitted changes", "detach with an untracked inlay file")
+	f.inlayOK(f.root, "team", "add", "notes/b.md")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "more notes")
+	f.inlayOK(f.root, "detach", "team", "--force")
+	if !f.exists("sample.cfg") {
+		t.Fatal("detach removed the host file")
+	}
+}
+
 // A failed init leaves neither a git dir that would look attached nor a
 // stray manifest in the tree.
 func TestInitFailureLeavesNothing(t *testing.T) {

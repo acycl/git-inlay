@@ -286,6 +286,12 @@ tree:
 `git inlay <name> clean -fd` and a plain `git inlay <name> stash` stay
 within the inlay's claims. Run the others in the host.
 
+One case narrows that. Where a host `.gitignore` re-includes a host file
+that the inlay would otherwise ignore (see
+[other ignore rules](concepts.md#other-ignore-rules)), the inlay sees the
+file as untracked, and `clean` (except with `-n`) and `stash -u` are
+refused while such files exist. The refusal names them.
+
 ## version
 
 ```

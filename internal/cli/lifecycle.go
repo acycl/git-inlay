@@ -94,11 +94,17 @@ func (c *cli) detach(args []string) error {
 	}
 	in := e.Inlay
 	if !*force {
-		dirty, err := in.Git().Output("status", "--porcelain")
+		dirty, err := in.Git().Output("status", "--porcelain", "--untracked-files=no")
 		if err != nil {
 			return err
 		}
-		if dirty != "" {
+		// An untracked file outside the claims is a host file that a
+		// .gitignore negation shows the inlay; it is not the inlay's work.
+		own, _, err := untracked(e)
+		if err != nil {
+			return err
+		}
+		if dirty != "" || len(own) > 0 {
 			return fmt.Errorf("inlay %s has uncommitted changes; see them with: git inlay %s status, then commit them or use --force", name, name)
 		}
 		if st, err := stashes(in.Git()); err != nil {

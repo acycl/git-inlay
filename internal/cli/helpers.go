@@ -205,6 +205,27 @@ func (s *session) unexcluded() ([]manifest.Claim, error) {
 	return out, nil
 }
 
+// untracked splits the files inlay e neither tracks nor ignores into its
+// own, under its claims, and the exposed ones outside them. Those are host
+// files: the inlay's exclude file hides everything outside the claims, but
+// a host .gitignore outranks it, so a pattern there that re-includes a
+// path shows the inlay a file at the root, or directly inside a directory
+// that leads to a claim, as untracked.
+func untracked(e inlay.Entry) (own, exposed []string, err error) {
+	files, err := e.Inlay.Untracked()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range files {
+		if _, ok := e.Manifest.Owner(p); ok {
+			own = append(own, p)
+		} else {
+			exposed = append(exposed, p)
+		}
+	}
+	return own, exposed, nil
+}
+
 // warnIgnored tells the user when a host .gitignore file ignores a claim.
 // Tracked files are unaffected, but new files under such a claim never show
 // as untracked in the inlay and must be added with -f.
