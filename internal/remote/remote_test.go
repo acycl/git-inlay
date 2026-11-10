@@ -26,7 +26,7 @@ func TestNormalizeEquivalents(t *testing.T) {
 			t.Errorf("Normalize(%q) = %q, want %q", u, got, want)
 		}
 	}
-	different := []string{"https://github.com/acme/app2", "https://gitlab.com/acme/app", "ssh://git@github.com:2222/acme/app"}
+	different := []string{"https://github.com/acme/app2", "https://gitlab.com/acme/app", "ssh://git@github.com:2222/acme/app2"}
 	for _, u := range different {
 		if Same(same[0], u) {
 			t.Errorf("Same(%q, %q) = true", same[0], u)
@@ -44,9 +44,16 @@ func TestSamePorts(t *testing.T) {
 		{"https://git.corp.example/acme/app.git", "ssh://git@git.corp.example:2222/acme/app.git", true},
 		{"https://git.corp.example:8443/acme/app", "git@git.corp.example:acme/app", true},
 		{"http://git.corp.example/acme/app", "https://git.corp.example/acme/app", true},
-		{"ssh://git@git.corp.example/acme/app", "ssh://git@git.corp.example:2222/acme/app", false},
+		// Without a port a URL may reach any: ~/.ssh/config can set it.
+		{"ssh://git@git.corp.example/acme/app", "ssh://git@git.corp.example:2222/acme/app", true},
+		{"git@git.corp.example:acme/app", "ssh://git@git.corp.example:2222/acme/app.git", true},
 		{"git@git.corp.example:acme/app", "ssh://git.corp.example:22/acme/app", true},
-		{"https://git.corp.example/acme/app", "https://git.corp.example:8443/acme/app", false},
+		{"https://git.corp.example/acme/app", "https://git.corp.example:8443/acme/app", true},
+		// Two ports named for one transport are two servers.
+		{"ssh://git@git.corp.example:22/acme/app", "ssh://git@git.corp.example:2222/acme/app", false},
+		{"https://git.corp.example:443/acme/app", "https://git.corp.example:8443/acme/app", false},
+		// Brackets inside a path are the path's.
+		{"git@host.example:org/a[b]:c.git", "ssh://git@host.example/org/a[b]:c", true},
 		{"git@[::1]:acme/app", "ssh://git@[::1]/acme/app.git", true},
 		{"https://git.corp.example/acme/app", "ssh://git@git.corp.example:2222/acme/other", false},
 	}

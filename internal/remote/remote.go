@@ -111,16 +111,18 @@ func Absolute(base, u string) string {
 }
 
 // Same reports whether two URLs name the same repository. A port tells
-// two repositories apart only between URLs of one transport: a server
-// reached over https and over ssh on a port of its own is still one server,
-// and taking the two for different repositories would let an inlay push to
-// its host's remote.
+// two repositories apart only when both URLs name one, for the same
+// transport. A server reached over https and over ssh on a port of its own
+// is still one server; and a URL without a port may reach any, since
+// ~/.ssh/config can set it. Taking such a pair for different repositories
+// would let an inlay push to its host's remote, which costs more than
+// refusing two servers that share a name.
 func Same(a, b string) bool {
 	la, lb := locate(a), locate(b)
 	if la.key != lb.key {
 		return false
 	}
-	return la.transport != lb.transport || la.port == lb.port
+	return la.transport != lb.transport || la.port == "" || lb.port == "" || la.port == lb.port
 }
 
 // Normalize reduces a git URL to a comparable "host/path" form: scp-like,
@@ -133,7 +135,7 @@ func Normalize(raw string) string { return locate(raw).key }
 type location struct {
 	key       string // "host/path", or the path alone for a local repository
 	transport string // "ssh", "https", "http" or "git"; empty for a local path
-	port      string // the transport's default when the URL names none
+	port      string // the port the URL names, or empty
 }
 
 // locate parses a git URL.
@@ -143,7 +145,7 @@ func locate(raw string) location {
 	host, p := "", s
 	if h, rest, ok := scpSplit(s); ok {
 		host, p = strings.ToLower(h), rest
-		loc.transport, loc.port = "ssh", defaultPorts["ssh"]
+		loc.transport = "ssh"
 	} else if strings.Contains(s, "://") {
 		if u, err := url.Parse(s); err == nil {
 			host, p = strings.ToLower(u.Hostname()), u.Path
@@ -155,9 +157,7 @@ func locate(raw string) location {
 			default:
 				loc.transport = scheme
 			}
-			if loc.port = u.Port(); loc.port == "" {
-				loc.port = defaultPorts[loc.transport]
-			}
+			loc.port = u.Port()
 		}
 	} else {
 		p = localPath(s)
@@ -172,9 +172,6 @@ func locate(raw string) location {
 	}
 	return loc
 }
-
-// defaultPorts maps a transport to the port a URL without one means.
-var defaultPorts = map[string]string{"ssh": "22", "https": "443", "http": "80", "git": "9418"}
 
 // driveSlash drops the slash a file URL puts before a Windows drive letter.
 func driveSlash(p string) string {
@@ -197,8 +194,12 @@ func scpSplit(s string) (host, path string, ok bool) {
 		return "", "", false
 	}
 	i := strings.Index(s, ":")
-	if j := strings.Index(s, "]:"); j >= 0 && strings.Contains(s[:j], "[") {
-		i = j + 1
+	// Brackets hold an IPv6 address when they open the host, straight
+	// away or after "user@"; anywhere else they belong to a name.
+	if at := strings.Index(s, "@["); strings.HasPrefix(s, "[") || at >= 0 && !strings.ContainsAny(s[:at], ":/") {
+		if j := strings.Index(s, "]:"); j >= 0 {
+			i = j + 1
+		}
 	}
 	if i <= 0 {
 		return "", "", false
