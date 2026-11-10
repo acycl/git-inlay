@@ -4,7 +4,7 @@ What changed for users in each release, newest first. Versions follow
 [semantic versioning](https://semver.org); before 1.0 a minor release may
 change behaviour.
 
-## Unreleased
+## 0.4.0 - 2026-11-10
 
 ### Changed
 
