@@ -727,6 +727,10 @@ func (c *cli) passthrough(name string, args []string) error {
 		return usagef("usage: git inlay %s <git command> [args]", name)
 	}
 	s, err := c.open()
+	var broken *inlay.ManifestError
+	if errors.As(err, &broken) && broken.Name == name {
+		return c.passthroughUnsynced(name, args, broken)
+	}
 	if err != nil {
 		return err
 	}
@@ -736,13 +740,8 @@ func (c *cli) passthrough(name string, args []string) error {
 	}
 	run := e.Inlay.GitAt(c.o.Dir)
 	expanded := resolveAliases(run, args)
-	if verb, ok := treeWide(expanded); ok {
-		what := "git " + strings.Join(args, " ")
-		if !slices.Equal(expanded, args) {
-			what += ", an alias of git " + strings.Join(expanded, " ") + ","
-		}
-		return fmt.Errorf("refusing to run %s against inlay %s: it would %s every file the inlay ignores, which is the whole host tree; run it in the host instead, or deliberately with: git --git-dir=%s --work-tree=%s %s",
-			what, name, verb, e.Inlay.GitDir, s.host.Root, strings.Join(args, " "))
+	if err := refuseTreeWide(e.Inlay, args, expanded); err != nil {
+		return err
 	}
 	if verb, ok := untrackedWide(expanded); ok {
 		_, exposed, err := untracked(e)
@@ -791,6 +790,64 @@ func (c *cli) passthrough(name string, args []string) error {
 		return fmt.Errorf("git succeeded, but the exclude files were not brought up to date: %w", syncErr)
 	}
 	return nil
+}
+
+// passthroughUnsynced is passthrough for an inlay whose manifest does not
+// parse, as after a pull that brought a bad line or a merge that left
+// conflict markers. Every other command stops there, but git run against
+// the inlay is how the manifest is put right (a checkout of the file, a
+// reset, a merge --abort), so it runs, without the sync before it. The
+// forms that act on untracked files are refused, since without claims
+// nothing tells the inlay's files from the host's.
+func (c *cli) passthroughUnsynced(name string, args []string, cause error) error {
+	h, err := host.Discover(c.o.Dir, c.o.Env)
+	if err != nil {
+		return err
+	}
+	in, err := inlay.Open(h, name)
+	if err != nil {
+		return err
+	}
+	run := in.GitAt(c.o.Dir)
+	expanded := resolveAliases(run, args)
+	if err := refuseTreeWide(in, args, expanded); err != nil {
+		return err
+	}
+	if _, ok := untrackedWide(expanded); ok {
+		return fmt.Errorf("%w; refusing to run git %s against it until the manifest parses", cause, strings.Join(args, " "))
+	}
+	c.warnf("%v; running git all the same, so that the manifest can be repaired", cause)
+	code, killed, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
+	if err != nil {
+		return err
+	}
+	if killed != 0 {
+		defer gitx.Reraise(killed)
+	}
+	// The sync, if the command repaired the manifest.
+	if _, err := c.open(); err != nil {
+		c.warnf("the exclude files were not brought up to date: %v", err)
+	}
+	if code != 0 {
+		return exitError{code}
+	}
+	return nil
+}
+
+// refuseTreeWide refuses the passthrough command args, which is expanded
+// once its aliases are resolved, when it would act on the whole host tree
+// (see treeWide).
+func refuseTreeWide(in *inlay.Inlay, args, expanded []string) error {
+	verb, ok := treeWide(expanded)
+	if !ok {
+		return nil
+	}
+	what := "git " + strings.Join(args, " ")
+	if !slices.Equal(expanded, args) {
+		what += ", an alias of git " + strings.Join(expanded, " ") + ","
+	}
+	return fmt.Errorf("refusing to run %s against inlay %s: it would %s every file the inlay ignores, which is the whole host tree; run it in the host instead, or deliberately with: git --git-dir=%s --work-tree=%s %s",
+		what, in.Name, verb, in.GitDir, in.Host.Root, strings.Join(args, " "))
 }
 
 // trackedPaths returns the paths inlay e tracks, or ok false when they

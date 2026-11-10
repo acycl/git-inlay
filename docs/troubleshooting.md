@@ -57,6 +57,23 @@ reach them. Remove the inlay's own untracked files by hand, or run the
 command the refusal prints once you have checked what it would take with
 `git inlay <name> clean -n`.
 
+### `.git-inlay/<name>.paths line N: ...`
+
+The inlay's manifest does not parse: a merge left conflict markers in it,
+a pull brought a line that is not a valid path, or a hand edit went wrong.
+No claim can be trusted without it, so every command stops, the host's
+guards included. The exception is git run against that inlay, which is
+how you put it right:
+
+```sh
+git inlay <name> status
+git inlay <name> checkout -- .git-inlay/<name>.paths   # back to the committed manifest
+git inlay <name> merge --abort                         # or give up the merge
+```
+
+For a conflict, you can also edit the file, keep the claims of both sides,
+remove the marker lines, and `git inlay <name> add` it.
+
 ### `<path> is tracked by the host`
 
 A path the host tracks cannot be claimed. See

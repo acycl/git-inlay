@@ -348,6 +348,22 @@ type Entry struct {
 	Gone     bool   // the linked worktree it is attached to no longer exists
 }
 
+// ManifestError reports an inlay whose manifest could not be read, which
+// stops every command, since no claim can be trusted without it. The
+// passthrough tells it apart: git run against that inlay is how a
+// manifest broken by a pull or a merge is put right.
+type ManifestError struct {
+	Name string // the inlay
+	Key  string // the worktree it is attached to
+	Err  error
+}
+
+func (e *ManifestError) Error() string {
+	return fmt.Sprintf("inlay %s in worktree %s: %v", e.Name, e.Key, e.Err)
+}
+
+func (e *ManifestError) Unwrap() error { return e.Err }
+
 // All lists every inlay attached to any worktree of the host. Each
 // manifest is read from its worktree's tree, as the current worktree's
 // is, so a claim staged but not committed in another worktree still
@@ -377,7 +393,7 @@ func All(h *host.Host) ([]Entry, error) {
 				e.Manifest, err = readManifest(root, Elsewhere(h, gitDir), e.Name, true)
 			}
 			if err != nil {
-				return fmt.Errorf("inlay %s in worktree %s: %w", e.Name, key, err)
+				return &ManifestError{Name: e.Name, Key: key, Err: err}
 			}
 			entries = append(entries, e)
 		}

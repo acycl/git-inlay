@@ -243,7 +243,11 @@ or reset can change a manifest; otherwise the host would show a newly
 pulled claim's files as untracked until the next command. When git
 fails, its exit status wins and a failure of that second sync is only a
 warning; when git succeeds, a failed sync, such as one that meets a
-pulled manifest that does not parse, fails the command. An interrupt
+pulled manifest that does not parse, fails the command. With such a
+manifest in the tree the first sync fails for every command; a passthrough
+to that inlay then runs git without it, since a checkout, a reset or a
+merge --abort is how the manifest is repaired, and refuses only `clean`
+and `stash -u`, which need the claims to be safe. An interrupt
 or quit from the terminal reaches git-inlay as well as git, since the
 terminal signals the whole foreground group. While git runs, git-inlay
 catches both and carries on: git decides what the key means, and may be

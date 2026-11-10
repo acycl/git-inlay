@@ -91,6 +91,9 @@ func ValidatePath(p string) error {
 		return errors.New("empty path")
 	case strings.ContainsAny(p, "\r\n"):
 		return errors.New("contains a line break")
+	case strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }):
+		// A tab would also break the tab-separated output of ls and which.
+		return errors.New("contains a control character")
 	case strings.HasPrefix(p, "#"):
 		return errors.New("starts with '#'")
 	case p != strings.TrimSpace(p):
@@ -131,16 +134,35 @@ type Manifest struct {
 // New returns an empty manifest.
 func New(name string) *Manifest { return &Manifest{Name: name} }
 
-// Parse reads a manifest file. Blank lines and '#' comments are ignored, and
-// a claim already covered by an earlier one is dropped.
+// ErrConflict reports a manifest that holds the markers of an unresolved
+// merge, whose lines would otherwise parse as claims.
+var ErrConflict = errors.New("holds merge conflict markers; resolve the merge and keep the claims of both sides")
+
+// conflictMarker reports whether line is one git writes into a file it
+// could not merge.
+func conflictMarker(line string) bool {
+	for _, m := range []string{"<<<<<<<", "|||||||", "=======", ">>>>>>>"} {
+		if line == m || strings.HasPrefix(line, m+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// Parse reads a manifest file. Blank lines and '#' comments are ignored, a
+// byte order mark is skipped, and a claim already covered by an earlier
+// one is dropped.
 func Parse(name string, data []byte) (*Manifest, error) {
 	m := New(name)
 	n := 0
-	for raw := range bytes.Lines(data) {
+	for raw := range bytes.Lines(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))) {
 		n++
 		line := strings.TrimRight(string(raw), "\r\n")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		if conflictMarker(line) {
+			return nil, fmt.Errorf("%s line %d: %w", File(name), n, ErrConflict)
 		}
 		c, err := ParseClaim(line)
 		if err != nil {

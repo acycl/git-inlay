@@ -3,6 +3,7 @@ package manifest
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,33 @@ func TestParseFormatRoundTrip(t *testing.T) {
 	}
 	if _, err := Parse("claude", []byte("/abs\n")); err == nil {
 		t.Error("Parse accepted an absolute path")
+	}
+}
+
+// Parse skips a byte order mark and refuses what would otherwise pass for
+// a claim: the markers of an unresolved merge and control characters.
+func TestParseRefusesNonClaims(t *testing.T) {
+	m, err := Parse("x", []byte("\xef\xbb\xbf.claude/\nnotes.md\n"))
+	if err != nil || !slices.Equal(m.Claims, []Claim{{Path: ".claude", Dir: true}, {Path: "notes.md"}}) {
+		t.Fatalf("Parse with a byte order mark = %v, %v", m, err)
+	}
+	conflict := "a.md\n<<<<<<< HEAD\nb.md\n||||||| base\n=======\nc.md\n>>>>>>> origin/main\n"
+	if _, err := Parse("x", []byte(conflict)); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "line 2") {
+		t.Errorf("Parse of a conflicted manifest = %v, want ErrConflict at line 2", err)
+	}
+	for _, marker := range []string{"<<<<<<<", "=======", ">>>>>>> theirs", "||||||| base"} {
+		if _, err := Parse("x", []byte(marker+"\n")); !errors.Is(err, ErrConflict) {
+			t.Errorf("Parse(%q) = %v, want ErrConflict", marker, err)
+		}
+	}
+	// A name that only starts like a marker is a claim.
+	if _, err := Parse("x", []byte("=======.md\n")); err != nil {
+		t.Errorf("Parse of a path that starts like a marker: %v", err)
+	}
+	for _, bad := range []string{"a\x00b", "a\tb", "n\x00o\x00t\x00e\x00", "a\x7fb"} {
+		if _, err := Parse("x", []byte(bad+"\n")); err == nil || !strings.Contains(err.Error(), "control character") {
+			t.Errorf("Parse(%q) = %v, want a control character error", bad, err)
+		}
 	}
 }
 

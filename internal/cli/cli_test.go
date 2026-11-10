@@ -776,6 +776,44 @@ func TestPassthroughSyncFailure(t *testing.T) {
 	contains(t, errOut, "empty path segment", "sync failure after git failed")
 }
 
+// A manifest that does not parse stops every command but git run against
+// its inlay, which is how a merge that left conflict markers in it, or a
+// pull that brought a bad line, is put right.
+func TestPassthroughRepairsBrokenManifest(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "team", "notes")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
+	good := f.read(".git-inlay/team.paths")
+	f.write(".git-inlay/team.paths", good+"<<<<<<< HEAD\ndocs/\n=======\nsrc/\n>>>>>>> theirs\n")
+
+	contains(t, f.inlayFails(f.root, 1, "ls"), "holds merge conflict markers", "ls with a conflicted manifest")
+	f.write("scratch.txt", "x\n")
+	f.gitFails(f.root, "commit", "-q", "--allow-empty", "-m", "the guard cannot vouch for this")
+	contains(t, f.inlayFails(f.root, 1, "team", "clean", "-fd"), "until the manifest parses", "clean with a conflicted manifest")
+
+	out, errOut, code := f.inlay(f.root, "team", "status", "--porcelain")
+	if code != 0 || out != " M .git-inlay/team.paths" {
+		t.Fatalf("status with a conflicted manifest: exit %d, stdout %q\n%s", code, out, errOut)
+	}
+	contains(t, errOut, "running git all the same", "status with a conflicted manifest")
+	contains(t, errOut, "the exclude files were not brought up to date", "status with a conflicted manifest")
+
+	_, errOut, code = f.inlay(f.root, "team", "checkout", "--", ".git-inlay/team.paths")
+	if code != 0 {
+		t.Fatalf("checkout of the manifest: exit %d\n%s", code, errOut)
+	}
+	if strings.Contains(errOut, "not brought up to date") {
+		t.Fatalf("the sync did not run after the repair:\n%s", errOut)
+	}
+	if got := f.read(".git-inlay/team.paths"); got != good {
+		t.Fatalf("manifest after the repair = %q, want %q", got, good)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after the repair")
+}
+
 // Scenario 5: an inlay remote that resolves to a host remote is refused.
 func TestRemoteGuard(t *testing.T) {
 	t.Parallel()
