@@ -27,7 +27,8 @@ type Host struct {
 	Env       []string // environment for git; nil means the process's
 	IndexFile string   // GIT_INDEX_FILE to honour, set by the pre-commit hook
 
-	ignoreCase *bool // cached core.ignoreCase
+	ignoreCase *bool   // cached core.ignoreCase
+	gitVersion *[2]int // cached major and minor version of git
 }
 
 // Discover finds the host worktree that contains dir.
@@ -142,9 +143,25 @@ func (h *Host) HooksPath() (string, error) {
 	return v, err
 }
 
-// HooksDir returns the directory git runs hooks from.
-func (h *Host) HooksDir() (string, error) {
-	return h.Git().Output("rev-parse", "--path-format=absolute", "--git-path", "hooks")
+// HooksDir returns the directory git runs hooks from when core.hooksPath
+// is unset: hooks is a path of the common dir, shared by every worktree,
+// so no process is needed to find it. It is spelled as git spells paths.
+func (h *Host) HooksDir() string {
+	return path.Join(filepath.ToSlash(h.CommonDir), "hooks")
+}
+
+// GitAtLeast reports whether git is version major.minor or newer. The
+// version is read once for the life of the host.
+func (h *Host) GitAtLeast(major, minor int) (bool, error) {
+	if h.gitVersion == nil {
+		gotMajor, gotMinor, err := h.Git().Version()
+		if err != nil {
+			return false, err
+		}
+		h.gitVersion = &[2]int{gotMajor, gotMinor}
+	}
+	v := h.gitVersion
+	return v[0] > major || v[0] == major && v[1] >= minor, nil
 }
 
 // SparseCheckout reports whether the host uses sparse checkout, which

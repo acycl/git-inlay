@@ -219,15 +219,13 @@ func statuses(h *host.Host, names []string) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	supported, err := run.AtLeast(2, configSince)
+	supported, err := h.GitAtLeast(2, configSince)
 	if err != nil {
 		return nil, err
 	}
 	dir := hooksPath
 	if dir == "" {
-		if dir, err = h.HooksDir(); err != nil {
-			return nil, err
-		}
+		dir = h.HooksDir()
 	}
 	r := &Report{HooksPath: hooksPath, Config: supported}
 	var cfg map[string]map[string]string
@@ -357,10 +355,10 @@ func InstallAttach(h *host.Host) (*Report, error) {
 // nothing where a hook manager or a foreign hook stands, not even a
 // config-defined hook beside it. It is what init, clone and attach do
 // unasked, so that a new inlay is guarded from its first commit. It
-// returns the hooks it placed a shim for that had none before.
-func InstallFree(h *host.Host) (placed []string, err error) {
-	placed, _, err = install(h, guards, false)
-	return placed, err
+// returns the hooks it placed a shim for that had none before, and the
+// state that results.
+func InstallFree(h *host.Host) (placed []string, after *Report, err error) {
+	return install(h, guards, false)
 }
 
 // install is Install for the hooks named, with config-defined hooks only
@@ -376,7 +374,8 @@ func install(h *host.Host, names []string, config bool) (placed []string, after 
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, s := range r.Statuses {
+	configChanged := false
+	for i, s := range r.Statuses {
 		switch {
 		case s.slot != "":
 			if err := WriteShim(s.slot, s.Hook); err != nil {
@@ -389,12 +388,21 @@ func install(h *host.Host, names []string, config bool) (placed []string, after 
 				if err := dropSection(run, s.Hook); err != nil {
 					return nil, nil, err
 				}
+				configChanged = true
 			}
+			// A shim just written is installed, whatever stood there.
+			r.Statuses[i].Path, r.Statuses[i].State = s.slot, Installed
 		case config && r.Config:
 			if err := configure(run, s.Hook, local[s.Hook], s.State != Configured); err != nil {
 				return nil, nil, err
 			}
+			configChanged = true
 		}
+	}
+	if !configChanged {
+		// Only files were written, and their state is known: reading it
+		// all back would cost the processes of a second look for nothing.
+		return placed, r, nil
 	}
 	after, err = statuses(h, names)
 	return placed, after, err

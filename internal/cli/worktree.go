@@ -55,11 +55,15 @@ func (c *cli) attach(args []string) error {
 			// The inlays attached before this one stay attached.
 			if i > 0 {
 				s.warnUnexcluded()
+				s.guardHost()
 			}
 			return err
 		}
 	}
 	s.warnUnexcluded()
+	// Once, for all of them: the host's guards do not depend on how many
+	// inlays there are.
+	s.guardHost()
 	return nil
 }
 
@@ -105,8 +109,9 @@ func (s *session) attachOne(name string) error {
 	if err != nil {
 		return err
 	}
-	// Branches land in a scratch namespace so the checkout below can create
-	// the local branch from an unborn HEAD; remote-tracking refs and tags
+	// The branch lands in a scratch namespace so the checkout below can
+	// create the local branch from an unborn HEAD; the sibling's other
+	// branches stay where they are; remote-tracking refs and tags
 	// are copied as they are, minus the symbolic origin/HEAD. The sibling's
 	// core.worktree may name a worktree whose parent directory is gone,
 	// which makes git refuse to start in it at all, so upload-pack and the
@@ -115,8 +120,9 @@ func (s *session) attachOne(name string) error {
 	// reads core.worktree from the repository's own config file, so a -c
 	// would not.
 	uploadPack := "GIT_WORK_TREE=" + hooks.ShellQuote(filepath.ToSlash(s.host.CommonDir)) + " git upload-pack"
+	sibRef := "refs/sibling/" + branch
 	if err := t.Run("fetch", "-q", "--upload-pack="+uploadPack, e.GitDir,
-		"+refs/heads/*:refs/sibling/*", "+refs/remotes/*:refs/remotes/*",
+		"+refs/heads/"+branch+":"+sibRef, "+refs/remotes/*:refs/remotes/*",
 		"^refs/remotes/origin/HEAD", "+refs/tags/*:refs/tags/*"); err != nil {
 		cleanup()
 		return err
@@ -133,7 +139,7 @@ func (s *session) attachOne(name string) error {
 			}
 		}
 	}
-	rev := "refs/sibling/" + branch
+	rev := sibRef
 	m, err := s.vetTree(t, name, rev, fmt.Sprintf("inlay %s in worktree %s", name, e.Key))
 	if err != nil {
 		cleanup()
@@ -156,14 +162,8 @@ func (s *session) attachOne(name string) error {
 			s.c.warnf("could not set the upstream of branch %s in inlay %s: %v", branch, name, err)
 		}
 	}
-	refs, err := g.Lines("for-each-ref", "--format=%(refname)", "refs/sibling/")
-	if err != nil {
-		s.c.warnf("could not remove the refs that attach fetched into inlay %s under refs/sibling: %v", name, err)
-	}
-	for _, r := range refs {
-		if err := g.Run("update-ref", "-d", r); err != nil {
-			s.c.warnf("could not remove %s from inlay %s: %v", r, name, err)
-		}
+	if err := g.Run("update-ref", "-d", sibRef); err != nil {
+		s.c.warnf("could not remove %s from inlay %s: %v", sibRef, name, err)
 	}
 	s.c.printf("attached inlay %s from worktree %s (branch %s, %d claims)\n", name, e.Key, branch, len(m.Claims))
 	if !hasRemote {

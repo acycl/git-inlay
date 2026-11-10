@@ -18,6 +18,7 @@ import (
 	"github.com/acycl/git-inlay/internal/host"
 	"github.com/acycl/git-inlay/internal/inlay"
 	"github.com/acycl/git-inlay/internal/manifest"
+	"github.com/acycl/git-inlay/internal/remote"
 )
 
 // Options is the process environment a command runs in. Tests supply their
@@ -353,6 +354,8 @@ type session struct {
 	entries []inlay.Entry
 	index   *guard.Index
 	noHooks bool // --no-hooks: leave the host's hooks directory alone
+
+	hostRemotes *[]remote.Remote // the host's remotes, once read
 }
 
 // open discovers the host and runs the sync step from docs/design.md section 5:
@@ -401,6 +404,12 @@ func (s *session) guards() (*guard.Index, error) {
 	}
 	return s.index, nil
 }
+
+// foldedGuards returns an index that matches paths whatever their case. A
+// path it does not match, no index matches, so the hooks, which run on
+// every commit and push and nearly always find nothing, ask it first and
+// read the host's core.ignoreCase only for a path it does match.
+func (s *session) foldedGuards() *guard.Index { return guard.NewIndex(s.entries, true) }
 
 // refresh rereads every manifest and regenerates the exclude files. With
 // no inlay left it drops the managed block instead.
@@ -699,21 +708,24 @@ func more(n int) string {
 // host with a hook manager or hooks of its own is left for the user to
 // decide on with hooks install.
 func (s *session) guardHost() {
+	var state *hooks.Report
 	if !s.noHooks {
-		placed, err := hooks.InstallFree(s.host)
+		placed, after, err := hooks.InstallFree(s.host)
 		switch {
 		case err != nil:
 			s.c.warnf("could not install the host leak guards: %v", err)
 		case len(placed) > 0:
 			s.c.printf("installed the host's %s guard(s); git inlay hooks uninstall removes them\n", strings.Join(placed, " and "))
 		}
+		state = after
 	}
-	s.hooksReminder()
+	s.hooksReminder(state)
 }
 
-// hooksReminder warns when a host leak guard is not active.
-func (s *session) hooksReminder() {
-	vs, warnings, err := s.hookViolations()
+// hooksReminder warns when a host leak guard is not active, judging by
+// state when the caller has just read it.
+func (s *session) hooksReminder(state *hooks.Report) {
+	vs, warnings, err := s.hookViolations(state)
 	if err != nil {
 		return
 	}
@@ -726,16 +738,18 @@ func (s *session) hooksReminder() {
 }
 
 // hookViolations reports the host hooks that run no guard while hooks
-// install could put one there. A hook that git-inlay can neither place a
+// install could put one there, reading their state unless r holds it. A hook that git-inlay can neither place a
 // guard beside nor read, under a hook manager on git older than 2.54,
 // comes back as a warning instead.
-func (s *session) hookViolations() ([]guard.Violation, []string, error) {
+func (s *session) hookViolations(r *hooks.Report) ([]guard.Violation, []string, error) {
 	if len(s.entries) == 0 {
 		return nil, nil, nil
 	}
-	r, err := hooks.Statuses(s.host)
-	if err != nil {
-		return nil, nil, err
+	if r == nil {
+		var err error
+		if r, err = hooks.Statuses(s.host); err != nil {
+			return nil, nil, err
+		}
 	}
 	var vs []guard.Violation
 	var warnings []string

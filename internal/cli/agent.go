@@ -63,7 +63,7 @@ func (c *cli) hookSessionStart() error {
 		fmt.Fprintf(&b, "- Other worktrees hold inlays that this one does not (%s); git inlay attach --all copies them here.\n",
 			strings.Join(elsewhere, ", "))
 	}
-	if vs, _, err := s.hookViolations(); err == nil && len(vs) > 0 {
+	if vs, _, err := s.hookViolations(nil); err == nil && len(vs) > 0 {
 		inactive := make([]string, len(vs))
 		for i, v := range vs {
 			inactive[i] = v.Path

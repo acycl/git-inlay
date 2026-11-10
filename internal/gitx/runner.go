@@ -203,15 +203,20 @@ func (r Runner) Bool(key string) (bool, error) {
 
 // AtLeast reports whether git is version major.minor or newer.
 func (r Runner) AtLeast(major, minor int) (bool, error) {
-	out, err := r.Output("version")
-	if err != nil {
-		return false, err
-	}
-	gotMajor, gotMinor, err := parseVersion(out)
+	gotMajor, gotMinor, err := r.Version()
 	if err != nil {
 		return false, err
 	}
 	return gotMajor > major || gotMajor == major && gotMinor >= minor, nil
+}
+
+// Version returns git's major and minor version.
+func (r Runner) Version() (major, minor int, err error) {
+	out, err := r.Output("version")
+	if err != nil {
+		return 0, 0, err
+	}
+	return parseVersion(out)
 }
 
 // parseVersion reads the major and minor version from the output of git

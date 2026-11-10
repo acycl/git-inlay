@@ -189,13 +189,19 @@ func (c *cli) hookPreCommit() error {
 	// Git may be committing from a temporary index (commit -a, commit <path>);
 	// inspect that one rather than .git/index.
 	s.host.IndexFile = c.env("GIT_INDEX_FILE")
-	x, err := s.guards()
+	vs, err := guard.Staged(s.host, s.foldedGuards(), s.attachedNames())
 	if err != nil {
 		return err
 	}
-	vs, err := guard.Staged(s.host, x, s.attachedNames())
-	if err != nil {
-		return err
+	if len(vs) > 0 {
+		// Judge again as the host matches paths, now that it matters.
+		x, err := s.guards()
+		if err != nil {
+			return err
+		}
+		if vs, err = guard.Staged(s.host, x, s.attachedNames()); err != nil {
+			return err
+		}
 	}
 	return c.refuse("commit", vs)
 }
@@ -221,13 +227,19 @@ func (c *cli) hookPrePush(args []string) error {
 	if err != nil {
 		return err
 	}
-	x, err := s.guards()
+	vs, err := guard.Outgoing(s.host, s.foldedGuards(), updates, remoteName)
 	if err != nil {
 		return err
 	}
-	vs, err := guard.Outgoing(s.host, x, updates, remoteName)
-	if err != nil {
-		return err
+	if len(vs) > 0 {
+		// Judge again as the host matches paths, now that it matters.
+		x, err := s.guards()
+		if err != nil {
+			return err
+		}
+		if vs, err = guard.Outgoing(s.host, x, updates, remoteName); err != nil {
+			return err
+		}
 	}
 	return c.refuse("push", vs)
 }
@@ -328,7 +340,7 @@ func (c *cli) hookInlayPrePush(args []string) error {
 	if err != nil {
 		return err
 	}
-	named := slices.Contains(names, remoteName)
+	named := func() bool { return slices.Contains(names, remoteName) }
 	var vs []guard.Violation
 	seen := map[string]bool{}
 	for _, u := range updates {

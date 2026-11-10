@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/acycl/git-inlay/internal/gitx"
 	"github.com/acycl/git-inlay/internal/host"
@@ -334,7 +335,7 @@ func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 // there are, all plumbing, so that no log configuration of the user's
 // changes what is found: the outgoing commits that touch any of them, in
 // which of those each exists as a file, and those commits' manifests.
-func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string, named bool) ([]Violation, error) {
+func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string, named func() bool) ([]Violation, error) {
 	run = pushed(run)
 	tip, err := inlay.ManifestAt(run, name, u.LocalOID)
 	if err != nil {
@@ -422,13 +423,13 @@ func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string
 
 // outgoingRange returns the revision arguments that select the commits an
 // update would publish, as revList chooses them.
-func outgoingRange(run gitx.Runner, u RefUpdate, remoteName string, named bool) []string {
+func outgoingRange(run gitx.Runner, u RefUpdate, remoteName string, named func() bool) []string {
 	if !IsZero(u.RemoteOID) && run.Run("cat-file", "-e", u.RemoteOID+"^{commit}") == nil {
 		return []string{u.LocalOID, "--not", u.RemoteOID}
 	}
 	// The remote's object is unknown locally, or there is none; fall back
 	// to the remote's refs.
-	if named {
+	if named() {
 		return []string{u.LocalOID, "--not", "--remotes=" + remoteName}
 	}
 	return []string{u.LocalOID}
@@ -507,8 +508,9 @@ func ParseRefUpdates(r io.Reader) ([]RefUpdate, error) {
 // removes a claimed path publishes nothing new and is the documented fix.
 // When the remote side of an update is unknown locally, commits already on
 // the named remote are excluded; for an unnamed remote the whole history
-// behind the update is scanned.
-func OutgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, named bool) ([]string, error) {
+// behind the update is scanned. named says whether remoteName is a
+// configured remote; it is asked only when that fallback is taken.
+func OutgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, named func() bool) ([]string, error) {
 	run = pushed(run)
 	seen := map[string]bool{}
 	for _, u := range updates {
@@ -537,7 +539,7 @@ func OutgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, name
 }
 
 // revList lists the commits an update would publish.
-func revList(run gitx.Runner, u RefUpdate, remoteName string, named bool) (string, error) {
+func revList(run gitx.Runner, u RefUpdate, remoteName string, named func() bool) (string, error) {
 	if !IsZero(u.RemoteOID) {
 		if out, err := run.Output("rev-list", u.LocalOID, "--not", u.RemoteOID); err == nil {
 			return out, nil
@@ -545,7 +547,7 @@ func revList(run gitx.Runner, u RefUpdate, remoteName string, named bool) (strin
 		// The remote's object may be unknown locally; fall back to its refs.
 	}
 	args := []string{"rev-list", u.LocalOID}
-	if named {
+	if named() {
 		args = append(args, "--not", "--remotes="+remoteName)
 	}
 	return run.Output(args...)
@@ -554,11 +556,18 @@ func revList(run gitx.Runner, u RefUpdate, remoteName string, named bool) (strin
 // Outgoing finds claimed paths in the commits a host push would publish
 // (pre-push).
 func Outgoing(h *host.Host, x *Index, updates []RefUpdate, remoteName string) ([]Violation, error) {
-	names, err := h.RemoteNames()
-	if err != nil {
-		return nil, err
+	// The remote's names are needed only when a range falls back to its
+	// refs, which an ordinary push of new commits does not.
+	var namesErr error
+	named := sync.OnceValue(func() bool {
+		names, err := h.RemoteNames()
+		namesErr = err
+		return slices.Contains(names, remoteName)
+	})
+	paths, err := OutgoingPaths(h.Git(), updates, remoteName, named)
+	if err == nil {
+		err = namesErr
 	}
-	paths, err := OutgoingPaths(h.Git(), updates, remoteName, slices.Contains(names, remoteName))
 	if err != nil {
 		return nil, err
 	}

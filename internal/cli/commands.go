@@ -445,7 +445,7 @@ func (c *cli) check(args []string) error {
 					Fix:    "git inlay prune"})
 			}
 		}
-		hv, warnings, err := s.hookViolations()
+		hv, warnings, err := s.hookViolations(nil)
 		if err != nil {
 			return err
 		}
@@ -572,16 +572,22 @@ func (c *cli) clone(args []string) error {
 	s.warnUnexcluded()
 	c.printf("attached inlay %s from %s (branch %s, %d claims)\n", name, url, branch, len(m.Claims))
 	s.attached(in, m)
+	s.warnHistory(m.Claims)
+	s.guardHost()
 	return nil
 }
 
-// checkRemote applies I4 to a candidate inlay remote URL.
+// checkRemote applies I4 to a candidate inlay remote URL. The host's
+// remotes are read once, however many inlays one command attaches.
 func (s *session) checkRemote(url string) error {
-	hostRemotes, err := remote.Configured(s.host.Git())
-	if err != nil {
-		return err
+	if s.hostRemotes == nil {
+		hostRemotes, err := remote.Configured(s.host.Git())
+		if err != nil {
+			return err
+		}
+		s.hostRemotes = &hostRemotes
 	}
-	return guard.CheckRemoteURL(hostRemotes, s.resolveURL(url))
+	return guard.CheckRemoteURL(*s.hostRemotes, s.resolveURL(url))
 }
 
 // stage creates the temporary bare repository that clone and attach fetch
@@ -683,15 +689,14 @@ func (s *session) place(tmp, name string, m *manifest.Manifest, checkout ...stri
 	return in, nil
 }
 
-// attached prints the claims of a newly attached inlay and the warnings
-// that apply to them.
+// attached prints the claims of a newly attached inlay and the warning
+// about those a host .gitignore covers. The caller sees to the host's
+// guards, once for all the inlays it attached.
 func (s *session) attached(in *inlay.Inlay, m *manifest.Manifest) {
 	for _, cl := range m.Claims {
 		s.c.printf("  %s\n", cl)
 	}
 	s.warnIgnored(in, m.Claims)
-	s.warnHistory(m.Claims)
-	s.guardHost()
 }
 
 // defaultBranch asks the remote which branch its HEAD points at, falling
@@ -774,6 +779,12 @@ func (c *cli) passthrough(name string, args []string) error {
 	if err := refuseTreeWide(e.Inlay, args, expanded); err != nil {
 		return err
 	}
+	// A command that only reads cannot bring a path into the inlay, so
+	// the listings that look for one, before and after, are left out.
+	reads := false
+	if i := gitSubcommand(expanded); i >= 0 {
+		reads = readOnly[expanded[i]]
+	}
 	if verb, ok := untrackedWide(expanded); ok {
 		_, exposed, err := untracked(e)
 		if err != nil {
@@ -785,7 +796,11 @@ func (c *cli) passthrough(name string, args []string) error {
 		}
 	}
 	before := e.Manifest.Claims
-	tracked, listed := trackedPaths(e)
+	var tracked map[string]bool
+	listed := false
+	if !reads {
+		tracked, listed = trackedPaths(e)
+	}
 	code, killed, err := run.Passthrough(c.o.Stdin, c.o.Stdout, c.o.Stderr, args...)
 	if err != nil {
 		return err
@@ -1022,6 +1037,39 @@ func untrackedWide(args []string) (verb string, ok bool) {
 	return "", false
 }
 
+// gitCommands lists commands that every supported git has. Git never lets
+// an alias stand in for a command, so for these there is no alias to look
+// up, which spares the everyday passthrough a process. A command missing
+// here is only looked up as before.
+var gitCommands = map[string]bool{
+	"add": true, "am": true, "apply": true, "bisect": true, "blame": true,
+	"branch": true, "cat-file": true, "check-ignore": true, "checkout": true,
+	"cherry-pick": true, "clean": true, "commit": true, "config": true,
+	"describe": true, "diff": true, "diff-tree": true, "fetch": true,
+	"for-each-ref": true, "format-patch": true, "fsck": true, "gc": true,
+	"grep": true, "log": true, "ls-files": true, "ls-remote": true,
+	"ls-tree": true, "merge": true, "merge-base": true, "mv": true,
+	"pull": true, "push": true, "range-diff": true, "rebase": true,
+	"reflog": true, "remote": true, "reset": true, "restore": true,
+	"rev-list": true, "rev-parse": true, "revert": true, "rm": true,
+	"shortlog": true, "show": true, "show-ref": true, "stash": true,
+	"status": true, "switch": true, "symbolic-ref": true, "tag": true,
+	"update-ref": true, "worktree": true,
+}
+
+// readOnly lists the commands among gitCommands that never change which
+// paths the index holds, whatever their arguments.
+var readOnly = map[string]bool{
+	"blame": true, "branch": true, "cat-file": true, "check-ignore": true,
+	"config": true, "describe": true, "diff": true, "diff-tree": true,
+	"fetch": true, "for-each-ref": true, "format-patch": true, "fsck": true,
+	"grep": true, "log": true, "ls-files": true, "ls-remote": true,
+	"ls-tree": true, "merge-base": true, "push": true, "range-diff": true,
+	"reflog": true, "remote": true, "rev-list": true, "rev-parse": true,
+	"shortlog": true, "show": true, "show-ref": true, "status": true,
+	"symbolic-ref": true, "tag": true, "update-ref": true,
+}
+
 // resolveAliases replaces an alias at the command position with what git
 // would run in its place, repeatedly, so that treeWide sees the command
 // behind it. It follows git's rules: configuration given with -c on the
@@ -1038,8 +1086,8 @@ func resolveAliases(run gitx.Runner, args []string) []string {
 		}
 		verb := args[i]
 		seen[verb] = true
-		if verb == "clean" || verb == "stash" {
-			return args // builtins, so this is what runs
+		if gitCommands[verb] {
+			return args // a command of git's, so this is what runs
 		}
 		cfg := configOptions(args[:i])
 		value, err := run.Output(slices.Concat(cfg, []string{"config", "--get", "alias." + verb})...)
