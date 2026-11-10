@@ -2027,6 +2027,51 @@ func TestPreCommitFrameworkProtocol(t *testing.T) {
 	}
 }
 
+// A host with sparse checkout is refused, however the setting is spelled.
+func TestSparseCheckoutRefused(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	for _, v := range []string{"true", "1", "yes", "on"} {
+		f.git(f.root, "config", "core.sparseCheckout", v)
+		contains(t, f.inlayFails(f.root, 1, "init", "team"), "sparse checkout", "init with core.sparseCheckout="+v)
+	}
+	f.git(f.root, "config", "core.sparseCheckout", "false")
+	f.inlayOK(f.root, "init", "team")
+}
+
+// The guards read what git would commit and push, whatever the user's
+// configuration and replace refs say: a nested repository staged at a
+// claimed path under diff.ignoreSubmodules, and a leaked commit papered
+// over with git replace, which a push sends as it is.
+func TestGuardsSeeThroughConfigAndReplace(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	nested := filepath.Join(f.root, ".claude", "plugins", "foo")
+	writeFile(t, filepath.Join(nested, "plugin.json"), "{}\n")
+	f.git(nested, "init", "-q", "-b", "main")
+	f.git(nested, "add", "plugin.json")
+	f.git(nested, "commit", "-q", "-m", "plugin")
+	f.git(f.root, "config", "diff.ignoreSubmodules", "all")
+	f.git(f.root, "add", "-f", ".claude/plugins/foo")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "leak a nested repository"), ".claude/plugins/foo: belongs to inlay claude", "pre-commit under diff.ignoreSubmodules")
+	f.git(f.root, "rm", "-q", "-f", "--cached", ".claude/plugins/foo")
+
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+	leak := f.git(f.root, "rev-parse", "HEAD")
+	clean := f.git(f.root, "commit-tree", "origin/main^{tree}", "-p", "origin/main", "-m", "clean")
+	f.git(f.root, "replace", leak, clean)
+	if got := f.git(f.root, "ls-tree", "-r", "--name-only", "HEAD"); got != "README.md" {
+		t.Fatalf("the replacement is not in effect: HEAD holds %q", got)
+	}
+	contains(t, f.gitFails(f.root, "push", "-q", "origin", "main"), ".claude/settings.json: belongs to inlay claude", "pre-push of a replaced commit")
+}
+
 // A push by URL has no remote-tracking refs to subtract, so the whole
 // history behind the update is scanned: a leak that reached a named remote
 // earlier is still refused on its way to another repository.

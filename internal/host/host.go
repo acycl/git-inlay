@@ -150,8 +150,7 @@ func (h *Host) HooksDir() (string, error) {
 // SparseCheckout reports whether the host uses sparse checkout, which
 // git-inlay does not support.
 func (h *Host) SparseCheckout() (bool, error) {
-	v, _, err := h.Git().Config("core.sparseCheckout")
-	return strings.EqualFold(v, "true"), err
+	return h.Git().Bool("core.sparseCheckout")
 }
 
 // Tracked returns the host-tracked paths matching the literal pathspecs.
@@ -272,7 +271,9 @@ func (h *Host) IgnoreCase() (bool, error) {
 // Staged returns the paths staged as added, copied, modified, renamed or
 // changed in type, the same filter the pre-push guard applies to commits.
 func (h *Host) Staged() ([]string, error) {
-	return h.Git().OutputZ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT")
+	// A repository nested at a claimed path is staged as a submodule entry,
+	// which diff.ignoreSubmodules in the user's config would leave out.
+	return h.Git().OutputZ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT", "--ignore-submodules=none")
 }
 
 // RemoteNames returns the configured remote names.

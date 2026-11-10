@@ -281,12 +281,23 @@ func Containment(in *inlay.Inlay, m *manifest.Manifest) ([]Violation, error) {
 	return out, nil
 }
 
+// pushed returns run with replace refs switched off. A push sends the
+// objects themselves, so a guard that judges what a push would publish
+// must read those, not what git replace put in their place: a leaked
+// commit "fixed" with a replacement would otherwise pass and go out as it
+// is.
+func pushed(run gitx.Runner) gitx.Runner {
+	run.ExtraEnv = append(slices.Clone(run.ExtraEnv), "GIT_NO_REPLACE_OBJECTS=1")
+	return run
+}
+
 // ContainmentAt finds paths in the tree of rev, read through run, that are
 // under no claim of the manifest inlay name has committed there (I3). That
 // tree and that manifest are what the receiving side gets and what a clone
 // of it enforces, whatever an uncommitted edit of the working-tree manifest
 // says. OutgoingStrays judges the commits on the way to that tip.
 func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
+	run = pushed(run)
 	m, err := inlay.ManifestAt(run, name, rev)
 	if err != nil {
 		return nil, err
@@ -324,6 +335,7 @@ func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 // changes what is found: the outgoing commits that touch any of them, in
 // which of those each exists as a file, and those commits' manifests.
 func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string, named bool) ([]Violation, error) {
+	run = pushed(run)
 	tip, err := inlay.ManifestAt(run, name, u.LocalOID)
 	if err != nil {
 		return nil, err
@@ -345,7 +357,7 @@ func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string
 	for _, p := range paths {
 		switch _, ok := tip.Owner(p); {
 		case ok:
-		case strings.Contains(p, "\n"):
+		case strings.ContainsAny(p, "\r\n"):
 			// No claim can hold a line break, so no manifest ever owned it,
 			// and the line-based queries below could not name it.
 			out = append(out, stray(p, "a commit"))
@@ -495,6 +507,7 @@ func ParseRefUpdates(r io.Reader) ([]RefUpdate, error) {
 // the named remote are excluded; for an unnamed remote the whole history
 // behind the update is scanned.
 func OutgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, named bool) ([]string, error) {
+	run = pushed(run)
 	seen := map[string]bool{}
 	for _, u := range updates {
 		if IsZero(u.LocalOID) {
