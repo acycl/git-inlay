@@ -93,7 +93,11 @@ statuses.
 | [Worktrees](docs/worktrees.md) | `git worktree`, automatic attach, pruning |
 | [Claude Code and other agents](docs/claude-code.md) | the plugin and the session-start briefing that tell a coding agent about the inlays |
 | [Troubleshooting](docs/troubleshooting.md) | refusals, warnings, and limitations |
-| [Design](docs/design.md) | the full design record: the on-disk model, the exclude generation, the invariants, the guards, and a comparison with git-dupe, sich, overgit, vcsh, and git-sidecar |
+
+For contributors, [`docs/design.md`](docs/design.md) is the design record:
+the on-disk model, the exclude generation, the invariants, the guards, the
+testing approach, and a comparison with git-dupe, sich, overgit, vcsh, and
+git-sidecar.
 
 ## License
 

@@ -13,6 +13,12 @@ repository's working tree, without ever committing them to that repository.
 | [Worktrees](worktrees.md) | use inlays with `git worktree`, attach them automatically, and prune them |
 | [Claude Code and other agents](claude-code.md) | tell a coding agent about the inlays in a checkout |
 | [Troubleshooting](troubleshooting.md) | read a refusal or a warning, and check the known limitations |
-| [Design](design.md) | follow the reasoning behind each decision, the internals, and a comparison with similar tools |
 
 The manual page is [`man/git-inlay.1`](../man/git-inlay.1).
+
+## For contributors
+
+[Design](design.md) is the design record: the reasoning behind each
+decision, the internals, the testing approach, and a comparison with
+similar tools. Comments in the code cite its sections by number, so keep
+the numbering stable when editing it.
