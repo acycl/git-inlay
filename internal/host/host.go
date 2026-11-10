@@ -145,9 +145,12 @@ func (h *Host) HooksPath() (string, error) {
 
 // HooksDir returns the directory git runs hooks from when core.hooksPath
 // is unset: hooks is a path of the common dir, shared by every worktree,
-// so no process is needed to find it. It is spelled as git spells paths.
+// so no process is needed to find it. It is spelled as git spells paths,
+// and joined by hand: path.Join would clean the "//" that opens a network
+// share's path on Windows down to "/", and the shims would go to another
+// volume.
 func (h *Host) HooksDir() string {
-	return path.Join(filepath.ToSlash(h.CommonDir), "hooks")
+	return strings.TrimSuffix(filepath.ToSlash(h.CommonDir), "/") + "/hooks"
 }
 
 // GitAtLeast reports whether git is version major.minor or newer. The
