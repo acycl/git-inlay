@@ -104,7 +104,10 @@ func Command(sub string) string {
 // body returns the lines shared by Shim and Command; each completes the
 // final exec with the hook's arguments.
 func body(sub string) []string {
-	hint := "Run 'git inlay hooks uninstall' in the host repository to remove this hook."
+	// With the binary gone, hooks uninstall cannot run either, so the hint
+	// names what to remove by hand: the shim's own file, or the config
+	// section when git runs this line from there.
+	hint := "Reinstall git-inlay, or remove this guard: the " + sub + " file in the hooks directory, or the hook.git-inlay-" + sub + " section of .git/config."
 	if sub == "inlay-pre-push" {
 		hint = "Reinstall git-inlay, or delete this hook file to push without the guard."
 	}
