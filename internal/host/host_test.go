@@ -211,6 +211,36 @@ func TestRelThroughSymlink(t *testing.T) {
 	}
 }
 
+// On a case-insensitive filesystem a shell keeps the current directory as
+// it was typed, while git reports the root as it is on disk; Rel finds the
+// root by identity where the spelling differs.
+func TestRelFromDirectoryInAnotherCase(t *testing.T) {
+	base := realTempDir(t)
+	root := filepath.Join(base, "Root")
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	typed := filepath.Join(base, "ROOT")
+	if _, err := os.Stat(typed); err != nil {
+		t.Skip("the filesystem is case-sensitive")
+	}
+	h := &Host{Root: filepath.ToSlash(root)}
+	for _, c := range []struct{ cwd, p, want string }{
+		{typed, ".", "."},
+		{typed, "a.txt", "a.txt"},
+		{filepath.Join(typed, "sub"), "b.txt", "sub/b.txt"},
+		{filepath.Join(typed, "sub"), filepath.Join("new", "c.txt"), "sub/new/c.txt"},
+	} {
+		got, err := h.Rel(c.cwd, c.p)
+		if err != nil || got != c.want {
+			t.Errorf("Rel(%q, %q) = %q, %v; want %q", c.cwd, c.p, got, err, c.want)
+		}
+	}
+	if got, err := h.Rel(typed, filepath.Join("..", "outside")); err == nil {
+		t.Errorf("Rel of a path outside the root = %q, want an error", got)
+	}
+}
+
 // Discover keys the main worktree "main" and a linked worktree
 // "wt/<id>", where id names its administrative directory under the common
 // dir, which differs from the path's base name when two collide.

@@ -324,19 +324,42 @@ func (h *Host) Rel(cwd, p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(h.Root, filepath.Join(parent, filepath.Base(abs)))
+	target := filepath.Join(parent, filepath.Base(abs))
+	rel, err := filepath.Rel(h.Root, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		// The root itself, reached through a symlink from outside it, is
-		// the root. filepath.Rel, not ==, since git spells Root with
-		// forward slashes on Windows.
-		if r, err := filepath.EvalSymlinks(abs); err == nil {
-			if self, err := filepath.Rel(h.Root, r); err == nil && self == "." {
-				return ".", nil
-			}
+		// By spelling the path is outside the root; by identity it may
+		// not be. The root itself, reached through a symlink from outside
+		// it, is the root. And on a case-insensitive filesystem the shell
+		// keeps a directory as it was typed, while git reports the root as
+		// it is on disk.
+		if rel, ok := relByIdentity(h.Root, target); ok {
+			return rel, nil
 		}
 		return "", fmt.Errorf("%s is outside the repository", p)
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+// relByIdentity finds target under root by walking up from it until a
+// directory is the same file as root, whatever the two are called, and
+// returns the slash path walked.
+func relByIdentity(root, target string) (string, bool) {
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return "", false
+	}
+	rest := "."
+	for cur := target; ; {
+		if fi, err := os.Stat(cur); err == nil && os.SameFile(fi, rootInfo) {
+			return filepath.ToSlash(rest), true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", false
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }
 
 // resolveExisting evaluates symlinks in the longest existing prefix of abs
