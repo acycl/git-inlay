@@ -98,6 +98,41 @@ write. Move the listed files aside and run the command again.
 
 ## Warnings
 
+### `no inlay named "<name>" is attached to this worktree`
+
+The first word after `git inlay` that is not a command is read as an
+inlay's name, so this is also what a mistyped command says. Otherwise the
+inlay is not in this worktree: `git inlay ls` shows the ones that are, and
+in a new worktree `git inlay attach --all` brings over the rest.
+
+### `<url> is the host's remote <name>`
+
+An inlay must have a repository of its own. Given the host's, `init
+--remote` and `clone` refuse, since a push of the inlay would put the
+private files exactly where they must not go. Create a separate, empty
+repository for the inlay.
+
+### `<url> is not an inlay repository`
+
+`clone` found no `.git-inlay/<name>.paths` on the remote's default branch.
+The URL names some other repository, or an inlay that was never pushed;
+`the remote has no branches` means the latter. Push it first, from where
+it was made, with `git inlay <name> push -u origin main`.
+
+### `inlay <name> now tracks N path(s) outside its claims`
+
+A pull or checkout brought in a commit that carries a file the inlay does
+not claim, and wrote it into the tree, over the host's file if one was
+there. `git status` in the host shows what was overwritten; `git checkout
+-- <path>` there gets it back. Then take the path out of the inlay, or
+claim it, as the `fix:` line of each path says.
+
+### `inlay <name> has uncommitted changes`, `has N stash(es)`, `has N commit(s) on no remote`
+
+`detach` and `prune` stop before work would be lost. Commit and push it,
+or pass `--force` to give it up. `prune` prints the push that clears each
+inlay it kept.
+
 ### `host leak guards are not active`
 
 A hook manager or a hook of the host's own occupies the hooks directory.
@@ -126,15 +161,15 @@ Each path comes with its fix.
 | A new file under a claimed directory does not show in `git inlay <name> status` | The host's `.gitignore`, or your global excludes file, ignores it. Add it with `git inlay <name> add -f <path>`. |
 | A new worktree has no inlay files | Run `git inlay attach --all` there, or install the [auto-attach hook](worktrees.md#attaching-automatically). |
 | `git inlay check` reports an inlay whose worktree is gone | `git inlay prune`. |
-| Commits or pushes fail with `git-inlay: binary not on PATH` | The hook cannot find the binary. Put `git-inlay` back on `PATH`, or run `git inlay hooks uninstall` if you have stopped using it. |
+| Commits or pushes fail with `git-inlay: binary not on PATH` | The hook cannot find the binary. Put `git-inlay` back on `PATH`. If you have stopped using it and the binary is gone, remove the guards by hand; see [uninstalling](getting-started.md#uninstalling). |
 | A GUI client commits a claimed path without complaint | Its bundled git is older than 2.54 and skips config-defined hooks. See [Guards](guards.md#beside-a-hook-manager-or-an-existing-hook). |
-| The Claude Code plugin's session-start hook fails with an unknown hook error | The installed `git-inlay` predates `hook session-start`. Upgrade the binary. |
+| The Claude Code plugin's session-start hook fails with `unknown hook "session-start"` | The installed `git-inlay` is 0.1.0, which predates the hook. Upgrade to 0.2.0 or later. |
 | `git inlay --help` says there is no manual entry | Install `man/git-inlay.1`, or use `git inlay -h`. |
 
 ## Limitations
 
-- Sparse checkout in the host is unsupported; `init` and `clone` refuse
-  it.
+- Sparse checkout in the host is unsupported; `init`, `clone` and
+  `attach` refuse it.
 - Claims inside a submodule of the host are refused.
 - Claims are explicit files or directories. There are no globs.
 - A host `.gitignore` outranks the managed exclude block. A pattern that

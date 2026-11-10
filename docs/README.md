@@ -14,7 +14,8 @@ repository's working tree, without ever committing them to that repository.
 | [Claude Code and other agents](claude-code.md) | tell a coding agent about the inlays in a checkout |
 | [Troubleshooting](troubleshooting.md) | read a refusal or a warning, and check the known limitations |
 
-The manual page is [`man/git-inlay.1`](../man/git-inlay.1).
+The manual page is [`man/git-inlay.1`](../man/git-inlay.1), and the
+[changelog](../CHANGELOG.md) lists what each release changed.
 
 ## For contributors
 

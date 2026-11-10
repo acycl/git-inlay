@@ -46,12 +46,12 @@ or, on Claude Code before 2.1.275:
 /plugin install git-inlay@git-inlay
 ```
 
-The plugin needs `git-inlay` on `PATH`, at a version that has
-`hook session-start`. It adds:
+The plugin needs `git-inlay` 0.2.0 or later on `PATH`, the first version
+with `hook session-start`. It adds:
 
 - a `SessionStart` hook that runs `git-inlay hook session-start` at
-  startup, on resume, and after a clear or a compaction, so the briefing
-  stays current;
+  the start of every session, however it starts (new, resumed, forked,
+  or after a clear or a compaction), so the briefing stays current;
 - a `git-inlay` skill with the procedures: setup, inspecting and recording
   changes, reading guard refusals, and recovery.
 
@@ -60,8 +60,8 @@ stay enabled for every project.
 
 ## Enabling the plugin for a team
 
-A team inlay can enable the plugin for everyone who clones it, through the
-`.claude/settings.json` it delivers:
+A team inlay can turn the plugin on for everyone who clones it, through
+the `.claude/settings.json` it delivers:
 
 ```json
 {
@@ -72,7 +72,13 @@ A team inlay can enable the plugin for everyone who clones it, through the
 }
 ```
 
-Claude Code adds the marketplace once a person trusts the folder.
+Claude Code adds the marketplace once a person trusts the folder. The
+entry turns the plugin on but does not download it, so each person still
+installs it once per clone:
+
+```sh
+claude plugin install git-inlay@git-inlay --scope project
+```
 
 ## Delivering Claude Code configuration through an inlay
 

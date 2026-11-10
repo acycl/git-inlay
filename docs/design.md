@@ -91,6 +91,7 @@ core.bare = false
 core.worktree = <absolute path of the host worktree>
 inlay.name = <name>
 inlay.host = <absolute common dir>
+core.hooksPath = <the inlay's own hooks directory>
 ```
 
 `core.worktree` is a courtesy for people who open the inlay with raw git. The
@@ -406,7 +407,7 @@ What guards do not cover, and the documented answer:
 
 ```
 cmd/git-inlay/main.go      entry point; calls internal/cli
-internal/cli/                one file per verb; flag parsing with the standard flag package
+internal/cli/                the verbs, grouped by kind; flag parsing with the standard flag package
 internal/gitx/               git subprocess runner
 internal/host/               host discovery: toplevel, common dir, worktree key, hooks dir, remotes
 internal/inlay/            inlay lifecycle: create, open, clone, attach, detach, enumerate
@@ -446,7 +447,9 @@ Dependencies: the standard library only, at runtime and in tests. No go-git.
 
 1. Resolve the host (toplevel, common dir, worktree key). Refuse outside a
    host worktree or inside a bare repository.
-2. Refuse a name that is a verb, contains `/`, or is already attached here.
+2. Refuse a name that is a verb, is not made of lowercase letters, digits,
+   `.`, `_` and `-` after a leading letter or digit, or is already attached
+   here.
 3. `git init --bare -b main $C/inlays/<key>/<name>`, then set the config of
    section 4.2 and write the inlay exclude.
 4. Write the manifest with only the header, stage it, and make the initial
@@ -556,7 +559,7 @@ Shim:
 #!/bin/sh
 # >>> git-inlay >>>
 bin=$(command -v git-inlay) || bin='/home/me/go/bin/git-inlay'
-[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. Run 'git inlay hooks uninstall' in the host repository to remove this hook." >&2; exit 1; }
+[ -x "$bin" ] || { echo "git-inlay: binary not on PATH${bin:+ or at $bin}; refusing. Reinstall git-inlay, or remove this guard: the pre-push file in the hooks directory, or the hook.git-inlay-pre-push section of .git/config." >&2; exit 1; }
 exec "$bin" hook pre-push "$@"
 # <<< git-inlay <<<
 ```

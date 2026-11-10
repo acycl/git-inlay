@@ -1,7 +1,6 @@
 .TH GIT-INLAY 1 "" "git-inlay" "Git Manual"
 .SH NAME
-git-inlay \- keep private sets of files tracked in git and present in a
-repository's working tree, without committing them to that repository
+git-inlay \- keep private files tracked and in a repository's tree, uncommitted to it
 .SH SYNOPSIS
 .nf
 \fBgit inlay init\fR <name> [\-\-remote <url>] [\-\-no\-hooks]
@@ -29,9 +28,9 @@ itself tracks. The host ignores every claim through a managed block in
 both sides stop anything from crossing over. The inlay's git directory
 lives under the host's \fI.git/inlays/\fR.
 .PP
-Every command but \fBversion\fR and \fBcheck\fR without \fB\-\-fix\fR
-first regenerates the two exclude files from the claims, so they are
-always current.
+Every command but \fBversion\fR, \fBcheck\fR without \fB\-\-fix\fR
+and the \fBhook\fR family first regenerates the two exclude files from
+the claims, so they are always current.
 .PP
 \fBclaim\fR, \fBunclaim\fR and \fBwhich\fR read paths relative to the
 current directory; a path that starts with \fB:(top)\fR is relative to
@@ -41,6 +40,8 @@ the root of the worktree instead.
 \fBinit\fR <name> [\-\-remote <url>] [\-\-no\-hooks]
 Create an empty inlay for this worktree, with \fIurl\fR as its
 \fBorigin\fR when given. A remote that is one of the host's is refused.
+A name is made of lowercase letters, digits, and the characters
+\fB.\fR, \fB_\fR and \fB\-\fR, and starts with a letter or a digit.
 .TP
 \fBclone\fR <url> [<name>] [\-\-no\-hooks]
 Attach an inlay from its remote and check out its files. A file already
@@ -105,9 +106,15 @@ and otherwise prints the lines to add by hand. \fBhooks install
 \fBattach \-\-all\fR in each worktree that \fBgit worktree add\fR
 creates and checks out.
 .TP
-<name> <git command> [<args>...]
+\fBhook session\-start\fR
+Print a briefing on this worktree's inlays for a coding agent's
+session\-start hook, or nothing where there are none. The other
+\fBhook\fR events are what the installed hooks call.
+.TP
+\fI<name>\fR \fI<git command>\fR [\fI<args>\fR...]
 Run any git command against an inlay, in the current directory.
-\fBclean \-x\fR, \fBclean \-X\fR and \fBstash \-\-all\fR are refused:
+\fBclean \-x\fR, \fBclean \-X\fR, \fBclean \-e '!...'\fR and
+\fBstash \-\-all\fR (or \fB\-a\fR) are refused:
 to an inlay the whole host tree is ignored files. \fBclean\fR and
 \fBstash \-u\fR are refused while the inlay sees host files as
 untracked, which a \fB.gitignore\fR pattern that re\-includes them
@@ -122,7 +129,8 @@ Print the version of git\-inlay and of git.
 Success.
 .TP
 1
-A guard refused, or an invariant failed.
+The command refused or failed: a guard or \fBcheck\fR found a problem,
+an inlay is unknown, work would be lost, or files are in the way.
 .TP
 2
 A usage error.
@@ -140,6 +148,19 @@ The git directories of the inlays, per worktree.
 .TP
 \fI$GIT_COMMON_DIR/info/exclude\fR
 Holds the managed block that makes the host ignore every claim.
+.TP
+\fI$GIT_COMMON_DIR/hooks/pre\-commit\fR, \fIpre\-push\fR, \fIpost\-checkout\fR
+The shims that \fBhooks install\fR writes where the hooks directory has
+room. Where it has none, on git 2.54 or newer, the guards are the
+sections \fBhook.git\-inlay\-pre\-commit\fR, \fBhook.git\-inlay\-pre\-push\fR
+and \fBhook.git\-inlay\-post\-checkout\fR of the host's
+\fI.git/config\fR.
+.SH ENVIRONMENT
+.TP
+\fBPRE_COMMIT_FROM_REF\fR, \fBPRE_COMMIT_TO_REF\fR, \fBPRE_COMMIT_REMOTE_NAME\fR, \fBPRE_COMMIT_LOCAL_BRANCH\fR
+Set by the pre\-commit framework for a pre\-push hook. \fBgit\-inlay
+hook pre\-push\fR reads the commits being pushed from them when they are
+set, and from its standard input, as git supplies them, otherwise.
 .SH NOTES
 \fBgit inlay \-\-help\fR is answered by git, which shows this page;
 \fBgit inlay \-h\fR prints the usage summary without it.

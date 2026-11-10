@@ -23,14 +23,14 @@ git inlay version
 - Options may appear anywhere on the command line; `--` ends them. An
   unknown option is a usage error, never a path.
 - `-h` or `--help` after a command prints the usage summary and does
-  nothing else. `git inlay --help` is answered by git, which shows the
+  nothing else, as do `git inlay -h` and `git inlay help`. `git inlay --help` is answered by git, which shows the
   manual page.
 - `claim`, `unclaim` and `which` read paths relative to the current
   directory. A path that starts with `:(top)` is relative to the root of
   the worktree instead.
 - Results go to stdout and diagnostics to stderr. There is no color.
-- Every command except `version` and `check` without `--fix` first
-  regenerates the exclude files from the claims (see
+- Every command except `version`, `check` without `--fix` and the `hook`
+  family first regenerates the exclude files from the claims (see
   [Concepts](concepts.md#how-the-two-repositories-stay-apart)).
 
 ## Exit status
@@ -38,11 +38,13 @@ git inlay version
 | Status | Meaning |
 |---|---|
 | 0 | success |
-| 1 | a guard refused, or an invariant failed |
+| 1 | the command refused or failed: a guard or `check` found a problem, an inlay is unknown, work would be lost, files are in the way |
 | 2 | usage error |
 | 3 | git failed |
 
-`git inlay <name> <git command>` exits with git's own status.
+`git inlay <name> <git command>` exits with git's own status, or with 1
+when git-inlay refuses to run it. `prune` exits 1 when it kept an inlay
+whose work exists nowhere else.
 
 ## Setting up inlays
 
@@ -59,12 +61,17 @@ inlay's `origin`; a URL that is one of the host's remotes is refused.
 Unless `--no-hooks` is given, `init` installs the host's
 [guards](guards.md) wherever the hooks directory has room.
 
-A name cannot contain `/`, cannot be a git-inlay command, and cannot be one
-of the names held back for future commands: `all`, `completion`, `doctor`,
+A name is made of lowercase letters, digits, `.`, `_` and `-`, and starts
+with a letter or a digit. It cannot be a git-inlay command, and cannot be
+one of the names held back for future commands: `all`, `completion`, `doctor`,
 `each`, `exec`, `fetch`, `list`, `mv`, `pull`, `push`, `repair`, `show`,
 `sync`.
 
-A host that uses sparse checkout is refused.
+A host that uses sparse checkout is refused, by `init`, `clone` and
+`attach` alike.
+
+A manifest already at `.git-inlay/<name>.paths`, as `detach --keep-files`
+leaves one, is not overwritten: `init` is refused until it is moved aside.
 
 ### clone
 
@@ -215,7 +222,8 @@ git inlay prune [--dry-run] [--force]
 ```
 
 Removes the inlays of worktrees that no longer exist, and the staging
-directories that an interrupted `clone` or `attach` left behind. Inlays
+directories that an interrupted `clone` or `attach` left behind, once
+they are a day old. Inlays
 with commits on no remote, or with stashes, are kept unless `--force` is
 given; for each, `prune` prints the push command that clears it. There is
 no interactive confirmation; use `--dry-run` to see what would happen.
@@ -277,7 +285,7 @@ claims changed, it warns about any that overlap another inlay's or that
 the host tracks or does not ignore. It also warns when the command brought
 in a tracked path that lies outside the inlay's claims.
 
-Three forms are refused, also behind a git alias, because from the inlay's
+These forms are refused, also behind a git alias, because from the inlay's
 side every host file is an ignored file and they would act on the whole
 tree:
 

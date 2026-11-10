@@ -99,6 +99,8 @@ the on-disk model, the exclude generation, the invariants, the guards, the
 testing approach, and a comparison with git-dupe, sich, overgit, vcsh, and
 git-sidecar.
 
+[`CHANGELOG.md`](CHANGELOG.md) lists what each release changed.
+
 ## License
 
 Apache-2.0; see `LICENSE`.

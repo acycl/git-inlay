@@ -114,8 +114,8 @@ it. Never get past a guard with `--no-verify` or `git add -f`.
   and the refusal names the `git log -p` that shows what they carry.
 - `refusing to push inlay <name>`: the push targets one of the host's
   remotes, or the inlay tracks a path outside its claims.
-- `refusing to run git clean -x against inlay <name>` (or `-X`, or
-  `stash --all`): from an inlay's side every host file is an ignored file,
+- `refusing to run git clean -x against inlay <name>` (or `-X`,
+  `-e '!...'`, or `stash --all`): from an inlay's side every host file is an ignored file,
   so these would act on the whole tree. `git inlay <name> clean -fd` and a
   plain `git inlay <name> stash` stay within the inlay's claims. If the
   refusal instead names `host file(s) the inlay does not ignore`, a host
@@ -123,8 +123,10 @@ it. Never get past a guard with `--no-verify` or `git add -f`.
   to the inlay, and do not run the override the refusal prints without
   the user's say.
 
-Exit status: 0 success, 1 a guard refused or an invariant failed, 2 usage,
-3 git failed. `git inlay <name> <git command>` exits with git's own status.
+Exit status: 0 success, 1 the command refused or failed (a guard or
+`check` found a problem, an inlay is unknown, work would be lost), 2
+usage, 3 git failed. `git inlay <name> <git command>` exits with git's own
+status, or 1 when git-inlay refuses to run it.
 
 ## Keeping the files
 

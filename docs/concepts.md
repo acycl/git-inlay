@@ -34,7 +34,10 @@ the `.git-inlay/` directory, which the host ignores.
 
 An inlay is a plain git repository. git-inlay creates it bare, then sets
 `core.bare` to false and `core.worktree` to the host's worktree, so raw git
-with `--git-dir` works against it too.
+with `--git-dir` works against it too. It also points `core.hooksPath` at
+the inlay's own hooks directory, where its push guard lives, so that no
+hook manager's setting in your global configuration switches the guard
+off.
 
 ## Claims and the manifest
 
@@ -97,9 +100,14 @@ directories leading to it:
 /.git-inlay/*
 !/docs/
 /docs/*
+!/packages/
+/packages/*
+!/packages/foo/
+/packages/foo/*
 !/.claude/
 !/.git-inlay/claude.paths
 !/docs/research/
+!/packages/foo/.claude/
 ```
 
 The result is that plain `git status` is correct on both sides: the host
