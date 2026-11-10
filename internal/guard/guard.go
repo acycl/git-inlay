@@ -112,11 +112,53 @@ type Violation struct {
 }
 
 func (v Violation) String() string {
-	s := v.Path + ": " + v.Reason
+	// A path comes from a commit that anyone may have written; one with a
+	// line break in it must not pass for a line of this report.
+	path := v.Path
+	if hasControl(path) {
+		path = Quote(path)
+	}
+	s := path + ": " + v.Reason
 	if v.Fix != "" {
 		s += "\n    fix: " + v.Fix
 	}
 	return s
+}
+
+// Quote renders s as one word of a command printed for the user to run,
+// so that a shell reads it back as s and nothing in it as syntax: a path
+// may hold "$(...)" or a backquote, and it comes from a commit that anyone
+// may have written. Single quotes do that for every shell; a string with a
+// control character takes the $'...' form of bash, zsh and ksh, which
+// keeps it on one line.
+func Quote(s string) string {
+	if !hasControl(s) {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	var b strings.Builder
+	b.WriteString("$'")
+	for i := range len(s) {
+		switch c := s[i]; {
+		case c == '\'' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c == '\n':
+			b.WriteString(`\n`)
+		case c == '\t':
+			b.WriteString(`\t`)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
+// hasControl reports whether s holds an ASCII control character.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
 // Overlaps finds claims of different inlays that own each other (I1), as
@@ -135,7 +177,7 @@ func (x *Index) Overlaps(entries []inlay.Entry) []Violation {
 							Path:   ca.String(),
 							Inlay:  a.Name,
 							Reason: fmt.Sprintf("overlaps %s claimed by inlay %s", cb, b.Name),
-							Fix:    fmt.Sprintf("git inlay unclaim %s %q   or   git inlay unclaim %s %q", a.Name, ":(top)"+ca.String(), b.Name, ":(top)"+cb.String()),
+							Fix:    fmt.Sprintf("git inlay unclaim %s %s   or   git inlay unclaim %s %s", a.Name, Quote(":(top)"+ca.String()), b.Name, Quote(":(top)"+cb.String())),
 						})
 					}
 				}
@@ -165,7 +207,7 @@ func HostTracked(h *host.Host, x *Index) ([]Violation, error) {
 			Path:   p,
 			Inlay:  o.Inlay,
 			Reason: fmt.Sprintf("tracked by the host but claimed by inlay %s", o.Inlay),
-			Fix:    fmt.Sprintf("git rm --cached -- %q && git commit   or   git inlay unclaim %s %q", ":(top,literal)"+p, o.Inlay, ":(top)"+o.Claim.String()),
+			Fix:    fmt.Sprintf("git rm --cached -- %s && git commit   or   git inlay unclaim %s %s", Quote(":(top,literal)"+p), o.Inlay, Quote(":(top)"+o.Claim.String())),
 		})
 	}
 	return out, nil
@@ -191,7 +233,7 @@ func Staged(h *host.Host, x *Index, attached []string) ([]Violation, error) {
 		if !ok {
 			continue
 		}
-		spec := fmt.Sprintf("%q", ":(top,literal)"+p)
+		spec := Quote(":(top,literal)" + p)
 		v.Fix = "git restore --staged -- " + spec
 		switch {
 		case v.Inlay == "":
@@ -232,7 +274,7 @@ func Containment(in *inlay.Inlay, m *manifest.Manifest) ([]Violation, error) {
 				Path:   p,
 				Inlay:  in.Name,
 				Reason: fmt.Sprintf("tracked by inlay %s but not under any of its claims", in.Name),
-				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q", in.Name, ":(top)"+p, in.Name, ":(top,literal)"+p),
+				Fix:    fmt.Sprintf("git inlay claim %s %s   or   git inlay %s rm --cached -- %s", in.Name, Quote(":(top)"+p), in.Name, Quote(":(top,literal)"+p)),
 			})
 		}
 	}
@@ -260,7 +302,7 @@ func ContainmentAt(run gitx.Runner, name, rev string) ([]Violation, error) {
 				Path:   p,
 				Inlay:  name,
 				Reason: "is in the tree being pushed but under no claim that inlay " + name + " has committed",
-				Fix:    fmt.Sprintf("git inlay claim %s %q   or   git inlay %s rm --cached -- %q   then commit", name, ":(top)"+p, name, ":(top,literal)"+p),
+				Fix:    fmt.Sprintf("git inlay claim %s %s   or   git inlay %s rm --cached -- %s   then commit", name, Quote(":(top)"+p), name, Quote(":(top,literal)"+p)),
 			})
 		}
 	}
@@ -513,7 +555,7 @@ func Outgoing(h *host.Host, x *Index, updates []RefUpdate, remoteName string) ([
 			// paths, not intent. Say so, since only the user can tell.
 			v.Fix = "remove the path from the unpushed commits, for example with git rebase -i, or unclaim it\n" +
 				"    if those commits were made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- " +
-				fmt.Sprintf("%q", ":(top,literal)"+p) + " and then push once with --no-verify"
+				Quote(":(top,literal)"+p) + " and then push once with --no-verify"
 			out = append(out, v)
 		}
 	}

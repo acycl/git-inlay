@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -117,5 +118,41 @@ func TestParseRefUpdates(t *testing.T) {
 	}
 	if _, err := ParseRefUpdates(strings.NewReader("too few fields\n")); err == nil {
 		t.Error("malformed line accepted")
+	}
+}
+
+// Quote's output, read back by a shell, is the original string, so that a
+// path with shell syntax in it is inert in a command the user pastes.
+func TestQuote(t *testing.T) {
+	plain := []string{"plain", "with space", "it's", "$(touch pwned)", "`id`", `back\slash`, `"quoted"`, "$HOME", "a;b&c|d"}
+	for _, s := range plain {
+		if got := Quote(s); !strings.HasPrefix(got, "'") {
+			t.Errorf("Quote(%q) = %s, want single quotes", s, got)
+		}
+	}
+	sh, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash to read the quoting back")
+	}
+	for _, s := range append(plain, "line\nbreak", "tab\there", "bell\a", "it's\n$(id)", `back\slash`+"\n") {
+		quoted := Quote(s)
+		if strings.ContainsAny(quoted, "\n\t\a") {
+			t.Errorf("Quote(%q) = %q holds a control character", s, quoted)
+		}
+		out, err := exec.Command(sh, "-c", "printf %s "+quoted).Output()
+		if err != nil {
+			t.Fatalf("bash -c printf %%s %s: %v", quoted, err)
+		}
+		if string(out) != s {
+			t.Errorf("bash read Quote(%q) = %s back as %q", s, quoted, out)
+		}
+	}
+}
+
+// A path with a line break cannot forge a line of a report.
+func TestViolationStringKeepsPathOnOneLine(t *testing.T) {
+	v := Violation{Path: "x\n    fix: rm -rf ~", Reason: "belongs to inlay team"}
+	if got, want := v.String(), `$'x\n    fix: rm -rf ~': belongs to inlay team`; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
 	}
 }

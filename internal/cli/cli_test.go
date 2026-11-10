@@ -369,7 +369,7 @@ func TestPushOfCommitsThatPredateTheClaim(t *testing.T) {
 	f.inlayOK(f.root, "hooks", "install")
 	errOut := f.gitFails(f.root, "push", "-q", "origin", "main")
 	contains(t, errOut, "CLAUDE.md: belongs to inlay claude", "pre-push")
-	contains(t, errOut, `made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- ":(top,literal)CLAUDE.md"`, "pre-push fix")
+	contains(t, errOut, `made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- ':(top,literal)CLAUDE.md'`, "pre-push fix")
 }
 
 // An interrupt from the terminal reaches git-inlay as well as git. It must
@@ -714,7 +714,7 @@ func TestPulledClaimOnHostTrackedPath(t *testing.T) {
 	}
 	contains(t, errOut, "the claims of inlay team changed, and 1 path(s) are out of place", "pull warning")
 	contains(t, errOut, "shared.md: tracked by the host but claimed by inlay team", "pull warning")
-	contains(t, errOut, `fix: git rm --cached -- ":(top,literal)shared.md" && git commit`, "pull warning")
+	contains(t, errOut, `fix: git rm --cached -- ':(top,literal)shared.md' && git commit`, "pull warning")
 	// From the inlay's side the host's copy is an ignored file, which git
 	// replaces without asking; that is what makes the warning matter.
 	if f.read("shared.md") != "private\n" {
@@ -816,7 +816,7 @@ func TestLeakGuards(t *testing.T) {
 	f.git(f.root, "add", "-f", ".claude/settings.json")
 	errOut := f.gitFails(f.root, "commit", "-q", "-m", "leak")
 	contains(t, errOut, ".claude/settings.json: belongs to inlay claude", "pre-commit")
-	contains(t, errOut, `git inlay claude add -- ":(top,literal).claude/settings.json" && git inlay claude commit -m`, "pre-commit fix")
+	contains(t, errOut, `git inlay claude add -- ':(top,literal).claude/settings.json' && git inlay claude commit -m`, "pre-commit fix")
 
 	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
 	contains(t, f.gitFails(f.root, "push", "-q", "origin", "main"), ".claude/settings.json: belongs to inlay claude", "pre-push")
@@ -1185,7 +1185,7 @@ func TestUnclaim(t *testing.T) {
 	f.write(".claude/settings.json", "{}\n")
 	f.inlayOK(f.root, "claim", "claude", ".claude")
 	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
-	contains(t, f.inlayFails(f.root, 1, "unclaim", "claude", ".claude/settings.json"), `the claim .claude/ covers it and can only be given up whole: git inlay unclaim claude ":(top).claude/"`, "unclaim beneath a claim")
+	contains(t, f.inlayFails(f.root, 1, "unclaim", "claude", ".claude/settings.json"), `the claim .claude/ covers it and can only be given up whole: git inlay unclaim claude ':(top).claude/'`, "unclaim beneath a claim")
 	contains(t, f.inlayOK(f.root, "unclaim", "claude", ".claude"), "unclaimed .claude from inlay claude", "unclaim output")
 	if got := f.git(f.root, "status", "--porcelain"); got != "?? .claude/" {
 		t.Fatalf("host status after unclaim = %q", got)
@@ -2080,7 +2080,7 @@ func TestTopAnchoredPaths(t *testing.T) {
 	f.write("pkg/.keep", "")
 	sub := filepath.Join(f.root, "pkg")
 	_, errOut, code := f.inlay(sub, "claim", "claude", "notes")
-	if code != 0 || !strings.Contains(errOut, `git inlay claim claude ":(top)pkg/notes/"`) {
+	if code != 0 || !strings.Contains(errOut, `git inlay claim claude ':(top)pkg/notes/'`) {
 		t.Fatalf("claim of a missing path from a subdirectory: exit %d, stderr %q", code, errOut)
 	}
 	f.inlayOK(sub, "claim", "claude", ":(top)pkg/notes/")
@@ -2445,7 +2445,7 @@ func TestSessionStartBriefing(t *testing.T) {
 	writeFile(t, stray, "stray\n")
 	f.git(wt, "add", "-f", "CLAUDE.local.md")
 	contains(t, f.gitFails(wt, "commit", "-q", "-m", "leak"),
-		`fix: git restore --staged -- ":(top,literal)CLAUDE.local.md"   then, to commit it to its inlay, move the file aside, run git inlay attach team`,
+		`fix: git restore --staged -- ':(top,literal)CLAUDE.local.md'   then, to commit it to its inlay, move the file aside, run git inlay attach team`,
 		"pre-commit in a worktree without the inlay")
 	wtSub := filepath.Join(wt, "pkg")
 	if err := os.Mkdir(wtSub, 0o755); err != nil {
