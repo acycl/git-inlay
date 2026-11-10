@@ -1,5 +1,5 @@
 // Package gitx runs git as a subprocess with explicit repository locations
-// (PLAN.md section 7.1). The mechanics tests beside it pin down the git
+// (docs/design.md section 7.1). The mechanics tests beside it pin down the git
 // behaviours the design depends on.
 package gitx
 

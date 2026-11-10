@@ -19,7 +19,7 @@ import (
 
 // restore re-checks out tracked inlay files that are missing from the
 // tree: the documented answer to git clean -x and git stash --all in the
-// host (PLAN.md section 6). Files that are present, modified or not, are
+// host (docs/design.md section 6). Files that are present, modified or not, are
 // left alone.
 func (c *cli) restore(args []string) error {
 	args, err := parseArgs(c.flagSet("restore"), args)

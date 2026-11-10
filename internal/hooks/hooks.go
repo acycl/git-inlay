@@ -1,5 +1,5 @@
 // Package hooks installs the shims that call git-inlay's guards from the
-// host's hooks and from each inlay's own hooks (PLAN.md section 7.3).
+// host's hooks and from each inlay's own hooks (docs/design.md section 7.3).
 package hooks
 
 import (

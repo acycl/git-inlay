@@ -1,4 +1,4 @@
-# git-inlay: implementation plan
+# git-inlay: design
 
 `git-inlay` keeps sets of files version-controlled and physically present in a
 git repository's working tree without ever committing them to that repository.
@@ -8,8 +8,10 @@ and remote, whose working tree is the host repository's working tree.
 Target uses: a team's `.claude/` configuration on an open-source project, and
 personal research notes kept next to the code they concern.
 
-Status: design record. Written 2026-10-31; every milestone in section 9 is
-done, and the text below is kept in step with the code.
+This is the design record: what the tool does, how, and why it is built
+this way. It began as the implementation plan and is kept in step with the
+code, whose comments cite its sections by number. The guides for using the
+tool are the other pages in [this directory](README.md).
 
 ## 1. Goals and non-goals
 
@@ -668,6 +670,16 @@ the plugin for its members through `extraKnownMarketplaces` and
 
 ## 8. Testing
 
+Mechanics tests in `internal/gitx/mechanics_test.go` drive raw git with no
+production code and pin the git behaviour the design relies on: an inlay
+made with a bare init plus config works for status, add, commit and
+checkout with explicit dirs; the common dir's exclude applies in a linked
+worktree; `git clean -x` leaves `.git` untouched; the negation chain
+re-includes a nested `.claude/`; a host exclude without a trailing slash
+matches a file or a directory; `git worktree add` refuses a non-empty
+directory. They were written before any code depended on them, and a
+failure there means the design must change.
+
 Unit tests, table-driven, in each package:
 
 - manifest: parse, format, sort, round trip, every validation rule
@@ -701,8 +713,7 @@ exercised:
 9. detach with and without `--keep-files`.
 10. passthrough runs with the right git dir and refuses a verb as a name.
 
-Workflow scenarios in `internal/cli/workflow_test.go` (added 2026-10-31)
-automate the dogfooding step on a host shaped like an open-source monorepo:
+Workflow scenarios in `internal/cli/workflow_test.go` automate the dogfooding step on a host shaped like an open-source monorepo:
 a committed `.gitignore` with local-file rules, a public `CLAUDE.md` and
 `.claude/skills/`, nested packages, a submodule, a release branch and a tag
 from before the agent config existed, a foreign hook, and the global
@@ -721,7 +732,7 @@ public `.claude/`, a nested package's settings, a host-ignored
   agent config, `reset --hard`
 - `stash -u` and `clean -fd` are harmless; `stash --all` and `clean -fdx`
   remove the inlay's files, and `stash pop` or the inlay's own checkout
-  bring them back (M5's `restore` wraps the latter)
+  bring them back (`restore` wraps the latter)
 - an upstream commit that adds a claimed path overwrites the inlay's copy
   on pull; `check` reports it, the untracking commit is pushable, and
   re-claiming the path warns that it exists in history
@@ -730,7 +741,7 @@ public `.claude/`, a nested package's settings, a host-ignored
 - a linked worktree before `attach`: claims still bind there through the
   common dir's exclude file and hooks
 
-Hook-manager mechanisms (added 2026-10-31): scripts under `core.hooksPath`
+Hook-manager mechanisms: scripts under `core.hooksPath`
 that call the guards, which is what husky and lefthook run, refuse leaks
 at commit and at push; the pre-commit framework's protocol, no stdin and
 the range in `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and
@@ -756,7 +767,7 @@ pre-granted trust could also check `permissions.allow` and
 `CLAUDE.local.md` loading, but it costs a model call per run, so it stays
 a manual pre-release step.
 
-CI (`.github/workflows/ci.yml`, added 2026-10-31): GitHub Actions on
+CI (`.github/workflows/ci.yml`): GitHub Actions on
 ubuntu, macos, and windows with the runner's git, a gofmt job, and one
 Linux job that builds git 2.40.1 from source (cached) and runs the suite
 against it. Supported floor: git 2.40, chosen for `--git-common-dir` and
@@ -778,37 +789,15 @@ tested on its OS and carrying the latest security fixes. The release workflow's
 attestation step needs the repository to be public, or on GitHub
 Enterprise Cloud. The Claude
 Code contract test skips on every runner, since none
-has the `claude` binary. Nothing has yet run on Windows; the first CI run
-is the first test of the hook shims and drive-letter paths there.
+has the `claude` binary.
 Releases (`.github/workflows/release.yml`, `.goreleaser.yaml`) build
 linux, darwin and windows binaries for amd64 and arm64 on a `v*` tag and
 open a draft release. A snapshot job in the CI workflow runs the same
 goreleaser build without publishing on every push, so a broken release
 config fails there rather than at tag time, and checks that the
-archives carry `LICENSE` (Apache-2.0, added 2026-11-03).
+archives carry `LICENSE` (Apache-2.0).
 
-Verification subagents per the project conventions: `go-test-runner` and
-`go-vet-runner` after each change; `code-reviewer` before each milestone is
-declared done.
-
-## 9. Milestones
-
-| # | Deliverable | Done when |
-|---|---|---|
-| M0 (done 2026-10-31) | Mechanics spike as standard-library tests in `internal/gitx/mechanics_test.go`, driving raw git with no production code | tests prove: bare-init-plus-config inlay works for status, add, commit, checkout with explicit dirs; the common dir's exclude applies in a linked worktree; `git clean -x` leaves `.git` untouched; the negation chain re-includes a nested `.claude/`; a host exclude without a trailing slash matches a file or a directory; `git worktree add` refuses a non-empty directory |
-| M1 (done 2026-10-31) | Core | `init`, `claim`, `unclaim`, `ls`, `which`, passthrough; manifest and both exclude generators; scenarios 1, 4, 10 |
-| M2 (done 2026-10-31) | Remotes | `clone`, remote normalization, I4; scenarios 3, 5 |
-| M3 (done 2026-10-31) | Guards | `check`, `hook pre-commit`, `hook pre-push`, inlay pre-push, `hooks install\|uninstall\|status`; scenarios 2, 8 |
-| M4 (done 2026-10-31) | Worktrees | worktree keys, `attach`, `prune`, union exclude; scenario 6 |
-| M5 (done 2026-10-31) | Lifecycle and release | `detach`, `restore`, `status`, `--porcelain`, README, goreleaser config, CI matrix; scenarios 7, 9 |
-
-M0 is done before any Go beyond the runner is written. If a mechanic fails,
-the design changes before code depends on it. The M0 tests stay as regression tests for the git behaviour the design
-relies on. M1 to M3 were built on 2026-10-31 with standard-library tests
-only; testscript was dropped because a small fixture type covers the same
-ground without a dependency.
-
-## 10. Risks and open questions
+## 9. Risks and open questions
 
 - **Case-insensitive filesystems.** Resolved: git sets `core.ignoreCase` at
   init by probing the directory, and under it the managed block's

@@ -18,7 +18,7 @@ import (
 )
 
 // attach copies inlays attached in another worktree of the host into this
-// one (PLAN.md section 7.2): the sibling's current branch is checked out
+// one (docs/design.md section 7.2): the sibling's current branch is checked out
 // and its remote reused, so the new inlay pushes to the real remote.
 func (c *cli) attach(args []string) error {
 	fs := c.flagSet("attach")
@@ -192,9 +192,9 @@ func (s *session) siblingNames() []string {
 	return names
 }
 
-// prune removes inlays whose host worktree is gone (PLAN.md section 7.4).
-// An inlay with commits on no remote is kept unless forced, since removing
-// it would lose work.
+// prune removes inlays whose host worktree is gone (docs/design.md section
+// 7.4). An inlay with commits on no remote is kept unless forced, since
+// removing it would lose work.
 func (c *cli) prune(args []string) error {
 	fs := c.flagSet("prune")
 	dryRun := fs.Bool("dry-run", false, "report only; remove nothing")

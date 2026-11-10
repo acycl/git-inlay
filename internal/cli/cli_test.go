@@ -1,7 +1,7 @@
 package cli_test
 
-// End-to-end scenarios from PLAN.md section 8, run through the built binary
-// as "git inlay ..." against real git in temp directories.
+// End-to-end scenarios from docs/design.md section 8, run through the built
+// binary as "git inlay ..." against real git in temp directories.
 
 import (
 	"bytes"

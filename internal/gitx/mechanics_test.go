@@ -1,6 +1,6 @@
 package gitx
 
-// The tests in this file are the M0 mechanics spike from PLAN.md section 9.
+// The tests in this file are the mechanics tests of docs/design.md section 8.
 // Each one pins down a git behaviour the design depends on, using raw git and
 // no production code, so a failure here means the design must change before
 // code is written against it.
@@ -125,9 +125,9 @@ func TestHostCleanLeavesInlayGitDir(t *testing.T) {
 }
 
 // TestNegationChainReincludesNestedClaims checks mechanic 4: the inlay
-// exclude produced by the algorithm in PLAN.md section 4.4 makes plain git see
-// exactly the claimed paths, including a .claude directory nested two levels
-// down, and nothing the host owns.
+// exclude produced by the algorithm in docs/design.md section 4.4 makes
+// plain git see exactly the claimed paths, including a .claude directory
+// nested two levels down, and nothing the host owns.
 func TestNegationChainReincludesNestedClaims(t *testing.T) {
 	const chain = `/*
 !/.git-inlay/
@@ -218,8 +218,9 @@ func TestHostExcludeWithoutSlashMatchesFileOrDirectory(t *testing.T) {
 }
 
 // TestWorktreeAddRefusesNonEmptyDirectory pins the reason inlays do not use
-// git's own linked worktrees (PLAN.md section 7.4): a worktree cannot be added
-// at a path that already has content, and the host worktree root always does.
+// git's own linked worktrees (docs/design.md section 7.4): a worktree cannot
+// be added at a path that already has content, and the host worktree root
+// always does.
 func TestWorktreeAddRefusesNonEmptyDirectory(t *testing.T) {
 	h := newHost(t)
 	occupied := filepath.Join(filepath.Dir(h.root), "occupied")
@@ -260,7 +261,7 @@ func newHost(t *testing.T) *repo {
 }
 
 // newInlay creates an inlay git dir under the host's .git in the layout
-// from PLAN.md section 4.1, configured as in section 4.2, with the given
+// from docs/design.md section 4.1, configured as in section 4.2, with the given
 // info/exclude content.
 func (h *repo) newInlay(t *testing.T, name, exclude string) *repo {
 	t.Helper()

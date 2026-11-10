@@ -460,7 +460,7 @@ func (c *cli) check(args []string) error {
 	return nil
 }
 
-// clone attaches an inlay from its remote (PLAN.md section 7.2).
+// clone attaches an inlay from its remote (docs/design.md section 7.2).
 func (c *cli) clone(args []string) error {
 	fs := c.flagSet("clone")
 	noHooks := fs.Bool("no-hooks", false, "do not install the host's guards")

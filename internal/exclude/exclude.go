@@ -1,6 +1,6 @@
 // Package exclude generates the two ignore files git-inlay maintains: the
 // managed block in the host's info/exclude and each inlay's negation chain
-// (PLAN.md section 4.4).
+// (docs/design.md section 4.4).
 package exclude
 
 import (

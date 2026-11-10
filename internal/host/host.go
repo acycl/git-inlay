@@ -23,7 +23,7 @@ type Host struct {
 	Root      string   // absolute root of this worktree, symlinks resolved
 	GitDir    string   // this worktree's git dir
 	CommonDir string   // the git dir shared by every worktree
-	Key       string   // "main" or "wt/<id>", from PLAN.md section 3
+	Key       string   // "main" or "wt/<id>", from docs/design.md section 3
 	Env       []string // environment for git; nil means the process's
 	IndexFile string   // GIT_INDEX_FILE to honour, set by the pre-commit hook
 

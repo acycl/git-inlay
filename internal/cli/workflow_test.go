@@ -1,7 +1,7 @@
 package cli_test
 
 // Day-in-the-life scenarios on a host shaped like an open-source monorepo.
-// They automate the dogfooding step from PLAN.md section 9: a team keeps
+// They are the workflow scenarios of docs/design.md section 8: a team keeps
 // its Claude Code settings interleaved with the project's public .claude
 // directory, one person keeps research notes, and ordinary git work on the
 // host must never disturb either.

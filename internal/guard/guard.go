@@ -1,5 +1,5 @@
-// Package guard checks the invariants from PLAN.md section 6 and powers the
-// pre-commit and pre-push hooks.
+// Package guard checks the invariants from docs/design.md section 6 and
+// powers the pre-commit and pre-push hooks.
 package guard
 
 import (

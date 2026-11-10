@@ -1,5 +1,5 @@
 // Package manifest defines an inlay's list of claims and the rules a claim
-// must satisfy (PLAN.md section 4.3).
+// must satisfy (docs/design.md section 4.3).
 package manifest
 
 import (

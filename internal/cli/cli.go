@@ -1,4 +1,4 @@
-// Package cli implements the git-inlay command line (PLAN.md section 5).
+// Package cli implements the git-inlay command line (docs/design.md section 5).
 package cli
 
 import (
@@ -31,7 +31,7 @@ type Options struct {
 	Version string
 }
 
-// Exit statuses from PLAN.md section 7.5.
+// Exit statuses from docs/design.md section 7.5.
 const (
 	exitOK        = 0
 	exitViolation = 1
@@ -277,7 +277,7 @@ type session struct {
 	noHooks bool // --no-hooks: leave the host's hooks directory alone
 }
 
-// open discovers the host and runs the sync step from PLAN.md section 5:
+// open discovers the host and runs the sync step from docs/design.md section 5:
 // manifests are read and the generated exclude files brought up to date.
 func (c *cli) open() (*session, error) {
 	h, err := host.Discover(c.o.Dir, c.o.Env)

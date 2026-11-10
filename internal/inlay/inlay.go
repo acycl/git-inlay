@@ -1,5 +1,5 @@
 // Package inlay manages the private repositories attached to a host
-// (PLAN.md sections 4.1, 4.2 and 7.2).
+// (docs/design.md sections 4.1, 4.2 and 7.2).
 package inlay
 
 import (
