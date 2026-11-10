@@ -636,3 +636,28 @@ func TestHostNegationExposesHostFilesToInlay(t *testing.T) {
 		t.Errorf("the inlay's clean -fd reached a host file behind an excluded directory: %v", err)
 	}
 }
+
+// TestDirectoryPatternSkipsSymlink pins why a symbolic link is claimed as a
+// file: a pattern with a trailing slash matches directories only, and git
+// does not follow a link to see one, so the inlay's "!/x/" would leave a
+// link at x excluded while the host's "/x" hides it, and neither repository
+// would have it. Without the slash both patterns match.
+func TestDirectoryPatternSkipsSymlink(t *testing.T) {
+	h := newHost(t)
+	target := filepath.Join(filepath.Dir(h.root), "shared")
+	writeFile(t, filepath.Join(target, "settings.json"), "{}\n")
+	for _, name := range []string{"asdir", "asfile"} {
+		if err := os.Symlink(target, filepath.Join(h.root, name)); err != nil {
+			t.Skipf("cannot create a symbolic link: %v", err)
+		}
+	}
+	ov := h.newInlay(t, "claude", "/*\n!/asdir/\n!/asfile\n")
+	h.exclude(t, "/asdir\n/asfile\n")
+
+	if got, want := ov.git(t, "ls-files", "--others", "--exclude-standard"), "asfile"; got != want {
+		t.Fatalf("inlay untracked files = %q, want %q", got, want)
+	}
+	if got := h.git(t, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status = %q, want empty", got)
+	}
+}

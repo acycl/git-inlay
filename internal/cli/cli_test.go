@@ -1772,6 +1772,35 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	}
 }
 
+// A symbolic link is claimed as the file git tracks it as, even when it
+// points at a directory: a directory claim's exclude pattern would never
+// match it, leaving the link in neither repository.
+func TestClaimSymlinkToDirectory(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	shared := filepath.Join(f.base, "shared")
+	writeFile(t, filepath.Join(shared, "settings.json"), "{}\n")
+	if err := os.Symlink(shared, filepath.Join(f.root, ".claude")); err != nil {
+		t.Skipf("cannot create a symbolic link: %v", err)
+	}
+	f.inlayOK(f.root, "init", "team")
+	for _, arg := range []string{".claude", ".claude/"} {
+		contains(t, f.inlayOK(f.root, "claim", "team", arg), "claimed .claude for inlay team", "claim "+arg)
+		if got, want := f.inlayOK(f.root, "team", "ls-files"), ".claude\n.git-inlay/team.paths"; got != want {
+			t.Fatalf("after claim %s, inlay ls-files = %q, want %q", arg, got, want)
+		}
+		if got := f.git(f.root, "status", "--porcelain"); got != "" {
+			t.Fatalf("after claim %s, host status = %q, want clean", arg, got)
+		}
+		contains(t, f.inlayOK(f.root, "check"), "ok:", "check")
+		f.inlayOK(f.root, "unclaim", "team", ".claude")
+	}
+
+	// A directory claim made before the path became a link is reported.
+	f.write(".git-inlay/team.paths", ".claude/\n")
+	contains(t, f.inlayFails(f.root, 1, "check"), ".claude/: is claimed as a directory but is a file", "check of a directory claim on a link")
+}
+
 // detach deletes what lies under the inlay's claims and nothing else: a
 // file the inlay came to track outside them, by a slip such as add -f, is
 // most likely the host's and stays.

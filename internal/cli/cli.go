@@ -481,8 +481,9 @@ func (s *session) refuseSparse() error {
 }
 
 // resolveClaim turns a command-line path into a claim, consulting the
-// filesystem to decide whether it is a directory. A path that does not
-// exist is a directory only with a trailing slash; guessed reports that
+// filesystem to decide whether it is a directory, which a symbolic link
+// to one is not. A path that does not exist is a directory only with a
+// trailing slash; guessed reports that
 // its kind, a file, is such a guess.
 func (s *session) resolveClaim(p string) (cl manifest.Claim, guessed bool, err error) {
 	rel, err := s.host.Rel(s.c.o.Dir, p)
@@ -493,7 +494,9 @@ func (s *session) resolveClaim(p string) (cl manifest.Claim, guessed bool, err e
 		rel = canonicalCase(s.host.Root, rel)
 	}
 	dir := strings.HasSuffix(p, "/") || strings.HasSuffix(p, string(os.PathSeparator))
-	if fi, err := os.Stat(filepath.Join(s.host.Root, filepath.FromSlash(rel))); err == nil {
+	// Not followed: git tracks a symbolic link as itself, a file, whatever
+	// it points at, and no directory pattern in an exclude file matches it.
+	if fi, err := os.Lstat(filepath.Join(s.host.Root, filepath.FromSlash(rel))); err == nil {
 		dir = fi.IsDir()
 	} else {
 		guessed = !dir
@@ -508,12 +511,12 @@ func (s *session) resolveClaim(p string) (cl manifest.Claim, guessed bool, err e
 // kindViolations reports the claims of e whose kind disagrees with the
 // disk. The kind is fixed when the claim is made, so a file claim on a path
 // that has since become a directory owns none of the files in it, though
-// the host ignores them, and a directory claim on what is now a file is one
-// the inlay's exclude file hides from it.
+// the host ignores them, and a directory claim on what is now a file, or a
+// symbolic link, is one the inlay's exclude file hides from it.
 func (s *session) kindViolations(e inlay.Entry) []guard.Violation {
 	var vs []guard.Violation
 	for _, cl := range e.Manifest.Claims {
-		fi, err := os.Stat(filepath.Join(s.host.Root, filepath.FromSlash(cl.Path)))
+		fi, err := os.Lstat(filepath.Join(s.host.Root, filepath.FromSlash(cl.Path)))
 		if err != nil || fi.IsDir() == cl.Dir {
 			continue
 		}
