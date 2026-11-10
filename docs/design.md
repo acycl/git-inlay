@@ -364,7 +364,10 @@ inlay's content looks the same. The refusal therefore names the
 What guards do not cover, and the documented answer:
 
 - `git clean -x` and `git stash -a` in the host remove ignored files from the
-  tree. `git inlay restore` brings them back; `stash pop` also restores them.
+  tree. After a clean, `git inlay restore` brings back what each inlay had
+  committed or staged. After a stash, `stash pop` brings them back with
+  their uncommitted changes, and a restore before it would stand in the
+  pop's way.
 - `--no-verify` on both commit and push bypasses the hooks. The inlay
   pre-push guard and the remote check still apply to the inlay side.
 - `-c core.hooksPath=/dev/null`, which git 2.50 documents as the way to

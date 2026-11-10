@@ -776,6 +776,26 @@ func TestPassthroughSyncFailure(t *testing.T) {
 	contains(t, errOut, "empty path segment", "sync failure after git failed")
 }
 
+// restore brings back a manifest with a claim that was staged and not yet
+// committed, and the exclude files then follow it, so the host does not
+// see the restored files as untracked.
+func TestRestoreSyncsStagedClaims(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	f.write("docs/x.md", "x\n")
+	f.inlayOK(f.root, "claim", "team", "docs/x.md")
+	f.git(f.root, "clean", "-fdxq")
+	if f.exists("docs/x.md") || f.exists(".git-inlay/team.paths") {
+		t.Fatal("clean -x left the inlay's files")
+	}
+	contains(t, f.inlayOK(f.root, "restore"), "restored 2 file(s) in inlay team", "restore output")
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after restore = %q, want clean", got)
+	}
+	contains(t, f.read(".git/info/exclude"), "/docs/x.md\n", "host exclude after restore")
+}
+
 // unclaim gives up a claimed file that was edited before its first commit,
 // whose staged content then matches neither HEAD nor the tree, and leaves
 // the file as it is.

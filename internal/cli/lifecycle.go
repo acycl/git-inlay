@@ -18,8 +18,9 @@ import (
 )
 
 // restore re-checks out tracked inlay files that are missing from the
-// tree: the documented answer to git clean -x and git stash --all in the
-// host (docs/design.md section 6). Files that are present, modified or not, are
+// tree: the documented answer to git clean -x in the host (docs/design.md
+// section 6). After git stash --all it is git stash pop that brings them
+// back, and a restore before it would stand in the pop's way. Files that are present, modified or not, are
 // left alone.
 func (c *cli) restore(args []string) error {
 	args, err := parseArgs(c.flagSet("restore"), args)
@@ -65,8 +66,12 @@ func (c *cli) restore(args []string) error {
 	}
 	if total == 0 {
 		c.printf("nothing to restore\n")
+		return nil
 	}
-	return nil
+	// The sync ran while a manifest was missing from the tree, on the
+	// claims of its last commit; one restored with a staged claim needs the
+	// exclude files to catch up.
+	return s.refresh()
 }
 
 // detach removes an inlay from this worktree. Uncommitted or unpushed work
