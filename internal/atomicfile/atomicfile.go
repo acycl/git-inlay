@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"time"
 )
 
 // WriteFile writes data to a temporary file beside path, syncs it, and
@@ -44,11 +46,24 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// rename moves tmp over path. On Windows that fails for as long as another
+// process holds path open without sharing it for deletion, as a git status
+// started by an editor does for the moment it reads an exclude file, so
+// there a few short waits outlast it.
+func rename(tmp, path string) error {
+	err := os.Rename(tmp, path)
+	for wait := 10 * time.Millisecond; err != nil && runtime.GOOS == "windows" && wait <= 160*time.Millisecond; wait *= 2 {
+		time.Sleep(wait)
+		err = os.Rename(tmp, path)
+	}
+	return err
 }
 
 // follow returns the file a symlink at path points at, so the link stays
