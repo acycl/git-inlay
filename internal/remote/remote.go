@@ -125,11 +125,11 @@ func Same(a, b string) bool {
 	return la.transport != lb.transport || la.port == "" || lb.port == "" || la.port == lb.port
 }
 
-// Normalize reduces a git URL to a comparable "host/path" form: scp-like,
+// normalize reduces a git URL to a comparable "host/path" form: scp-like,
 // ssh and https spellings of one repository compare equal, as do variants
 // with or without a user, a port, a trailing slash or a .git suffix. Case
 // is folded because the common hosting services ignore it.
-func Normalize(raw string) string { return locate(raw).key }
+func normalize(raw string) string { return locate(raw).key }
 
 // location is a git URL taken apart for comparison.
 type location struct {

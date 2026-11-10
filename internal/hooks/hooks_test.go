@@ -68,19 +68,19 @@ func TestManager(t *testing.T) {
 	}
 }
 
-// Command and Shim both run the named hook subcommand. Only the shim, a
+// command and Shim both run the named hook subcommand. Only the shim, a
 // file of its own, carries the markers that let uninstall recognize it;
-// Command is one line ending in the exec, since git appends "$@" itself
+// command is one line ending in the exec, since git appends "$@" itself
 // and ours matches on that ending.
 func TestCommandAndShim(t *testing.T) {
 	for _, name := range []string{"pre-commit", "pre-push", "inlay-pre-push"} {
 		line := `exec "$bin" hook ` + name
-		cmd, shim := Command(name), Shim(name)
+		cmd, shim := command(name), Shim(name)
 		if !strings.HasSuffix(cmd, line) {
-			t.Errorf("Command(%q) = %q, want it to end with %q", name, cmd, line)
+			t.Errorf("command(%q) = %q, want it to end with %q", name, cmd, line)
 		}
 		if strings.Contains(cmd, "\n") {
-			t.Errorf("Command(%q) spans lines: %q", name, cmd)
+			t.Errorf("command(%q) spans lines: %q", name, cmd)
 		}
 		if !strings.Contains(shim, line+` "$@"`+"\n") {
 			t.Errorf("Shim(%q) does not run %q with the hook's arguments:\n%s", name, line, shim)
@@ -88,12 +88,12 @@ func TestCommandAndShim(t *testing.T) {
 		if !strings.HasPrefix(shim, "#!/bin/sh\n") {
 			t.Errorf("Shim(%q) does not start with a #!/bin/sh line:\n%s", name, shim)
 		}
-		for _, m := range []string{Begin, End} {
+		for _, m := range []string{begin, end} {
 			if !strings.Contains(shim, m+"\n") {
 				t.Errorf("Shim(%q) lacks the marker %q:\n%s", name, m, shim)
 			}
 			if strings.Contains(cmd, m) {
-				t.Errorf("Command(%q) carries the marker %q: %q", name, m, cmd)
+				t.Errorf("command(%q) carries the marker %q: %q", name, m, cmd)
 			}
 		}
 	}

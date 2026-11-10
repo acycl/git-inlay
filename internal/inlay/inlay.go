@@ -24,7 +24,6 @@ import (
 // Inlay is one private repository attached to one host worktree.
 type Inlay struct {
 	Name   string
-	Key    string
 	GitDir string
 	Host   *host.Host
 }
@@ -49,7 +48,7 @@ func Open(h *host.Host, name string) (*Inlay, error) {
 	if !isRepo(dir) {
 		return nil, fmt.Errorf("no inlay named %q is attached to this worktree", name)
 	}
-	return &Inlay{Name: name, Key: h.Key, GitDir: dir, Host: h}, nil
+	return &Inlay{Name: name, GitDir: dir, Host: h}, nil
 }
 
 // Create initializes an empty inlay for the host's current worktree. A
@@ -77,7 +76,7 @@ func Create(h *host.Host, name string) (*Inlay, error) {
 // Adopt configures an existing bare git dir as an inlay of the host's
 // current worktree and installs its push guard.
 func Adopt(h *host.Host, name, dir string) (*Inlay, error) {
-	in := &Inlay{Name: name, Key: h.Key, GitDir: dir, Host: h}
+	in := &Inlay{Name: name, GitDir: dir, Host: h}
 	if err := in.Configure(); err != nil {
 		return nil, err
 	}
@@ -394,7 +393,7 @@ func All(h *host.Host) ([]Entry, error) {
 			}
 			e := Entry{Key: key, Name: d.Name(), GitDir: gitDir, Gone: gone}
 			if key == h.Key {
-				e.Inlay = &Inlay{Name: e.Name, Key: key, GitDir: gitDir, Host: h}
+				e.Inlay = &Inlay{Name: e.Name, GitDir: gitDir, Host: h}
 				e.Manifest, err = e.Inlay.ReadManifest()
 			} else {
 				e.Manifest, err = readManifest(root, Elsewhere(h, gitDir), e.Name, true)

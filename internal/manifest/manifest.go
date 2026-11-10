@@ -90,14 +90,14 @@ func parseClaim(s string) (Claim, error) {
 		c.Dir = true
 		c.Path = strings.TrimSuffix(s, "/")
 	}
-	if err := ValidatePath(c.Path); err != nil {
+	if err := validatePath(c.Path); err != nil {
 		return Claim{}, fmt.Errorf("invalid path %q: %w", s, err)
 	}
 	return c, nil
 }
 
-// ValidatePath applies the syntax rules a claim path must satisfy.
-func ValidatePath(p string) error {
+// validatePath applies the syntax rules a claim path must satisfy.
+func validatePath(p string) error {
 	switch {
 	case p == "":
 		return errors.New("empty path")

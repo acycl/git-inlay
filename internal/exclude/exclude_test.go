@@ -49,34 +49,34 @@ func TestInlayMatchesPlanExample(t *testing.T) {
 
 func TestHostBlock(t *testing.T) {
 	m := claims(t, "claude", "docs/research/", ".claude/", "odd#name")
-	got := HostBlock(m.All())
+	got := hostBlock(m.All())
 	want := HostBegin + "\n/.claude\n/.git-inlay\n/docs/research\n/odd\\#name\n" + HostEnd + "\n"
 	if got != want {
-		t.Fatalf("HostBlock:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("hostBlock:\n%s\nwant:\n%s", got, want)
 	}
 }
 
 func TestSplicePreservesOtherContent(t *testing.T) {
-	first := HostBlock(nil)
-	s := Splice([]byte("*.log"), first)
+	first := hostBlock(nil)
+	s := splice([]byte("*.log"), first)
 	if string(s) != "*.log\n"+first {
 		t.Fatalf("append: %q", s)
 	}
-	s = Splice(append(s, "tail\n"...), "# >>> git-inlay managed block; do not edit >>>\n/x\n# <<< git-inlay managed block <<<\n")
+	s = splice(append(s, "tail\n"...), "# >>> git-inlay managed block; do not edit >>>\n/x\n# <<< git-inlay managed block <<<\n")
 	if string(s) != "*.log\n"+HostBegin+"\n/x\n"+HostEnd+"\ntail\n" {
 		t.Fatalf("replace: %q", s)
 	}
-	if got := Strip(s); string(got) != "*.log\ntail\n" {
-		t.Fatalf("Strip: %q", got)
+	if got := strip(s); string(got) != "*.log\ntail\n" {
+		t.Fatalf("strip: %q", got)
 	}
 
 	// A stray end marker before the block must not hide the real one.
 	stray := HostEnd + "\n" + HostBegin + "\n/old\n" + HostEnd + "\n"
-	if got := Splice([]byte(stray), first); string(got) != HostEnd+"\n"+first {
+	if got := splice([]byte(stray), first); string(got) != HostEnd+"\n"+first {
 		t.Fatalf("stray end marker: %q", got)
 	}
-	if got := Strip([]byte(stray)); string(got) != HostEnd+"\n" {
-		t.Fatalf("Strip with stray end marker: %q", got)
+	if got := strip([]byte(stray)); string(got) != HostEnd+"\n" {
+		t.Fatalf("strip with stray end marker: %q", got)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestWriteHostAndRemoveHost(t *testing.T) {
 	if err := WriteHost(path, m.All()); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != HostBlock(m.All()) {
+	if got, _ := os.ReadFile(path); string(got) != hostBlock(m.All()) {
 		t.Fatalf("WriteHost on a missing file: %q", got)
 	}
 	if err := RemoveHost(path); err != nil {
@@ -103,14 +103,14 @@ func TestWriteHostAndRemoveHost(t *testing.T) {
 // A block whose end marker was deleted runs to the end of the file, so one
 // rewrite leaves the file current rather than nesting a second block.
 func TestSpliceOrphanBegin(t *testing.T) {
-	block := HostBlock([]manifest.Claim{{Path: "x"}})
+	block := hostBlock([]manifest.Claim{{Path: "x"}})
 	orphan := "*.log\n" + HostBegin + "\n/old\n"
-	once := Splice([]byte(orphan), block)
+	once := splice([]byte(orphan), block)
 	if string(once) != "*.log\n"+block {
-		t.Fatalf("Splice = %q", once)
+		t.Fatalf("splice = %q", once)
 	}
-	if twice := Splice(once, block); string(twice) != string(once) {
-		t.Fatalf("second Splice = %q, want %q", twice, once)
+	if twice := splice(once, block); string(twice) != string(once) {
+		t.Fatalf("second splice = %q, want %q", twice, once)
 	}
 	path := filepath.Join(t.TempDir(), "exclude")
 	if err := os.WriteFile(path, []byte(orphan), 0o644); err != nil {
@@ -131,16 +131,16 @@ func TestSpliceOrphanBegin(t *testing.T) {
 // content and stays.
 func TestMarkersMatchWholeLines(t *testing.T) {
 	quoted := "# git-inlay writes " + HostBegin + " here\n*.tmp\n"
-	if got := Strip([]byte(quoted)); string(got) != quoted {
-		t.Fatalf("Strip = %q", got)
+	if got := strip([]byte(quoted)); string(got) != quoted {
+		t.Fatalf("strip = %q", got)
 	}
-	block := HostBlock([]manifest.Claim{{Path: "x"}})
-	if got := Splice([]byte(quoted), block); string(got) != quoted+block {
-		t.Fatalf("Splice = %q", got)
+	block := hostBlock([]manifest.Claim{{Path: "x"}})
+	if got := splice([]byte(quoted), block); string(got) != quoted+block {
+		t.Fatalf("splice = %q", got)
 	}
 	crlf := "*.tmp\r\n" + HostBegin + "\r\n/old\r\n" + HostEnd + "\r\ntail\r\n"
-	if got := Strip([]byte(crlf)); string(got) != "*.tmp\r\ntail\r\n" {
-		t.Fatalf("Strip of a CRLF file = %q", got)
+	if got := strip([]byte(crlf)); string(got) != "*.tmp\r\ntail\r\n" {
+		t.Fatalf("strip of a CRLF file = %q", got)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestEscape(t *testing.T) {
 		"caf\xe9#":       "caf\xe9\\#", // Latin-1, not UTF-8: bytes pass through
 	}
 	for in, want := range cases {
-		if got := Escape(in); got != want {
-			t.Errorf("Escape(%q) = %q, want %q", in, got, want)
+		if got := escape(in); got != want {
+			t.Errorf("escape(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -163,15 +163,15 @@ func TestEscape(t *testing.T) {
 // others would keep paths hidden from the host after their claims are gone,
 // with check none the wiser.
 func TestDuplicateBlocksCollapse(t *testing.T) {
-	stale := HostBlock([]manifest.Claim{{Path: "old"}})
-	block := HostBlock([]manifest.Claim{{Path: "x"}})
+	stale := hostBlock([]manifest.Claim{{Path: "old"}})
+	block := hostBlock([]manifest.Claim{{Path: "x"}})
 	doubled := "*.log\n" + block + "between\n" + stale + "after\n"
 	want := "*.log\n" + block + "between\nafter\n"
-	if got := Splice([]byte(doubled), block); string(got) != want {
-		t.Fatalf("Splice = %q, want %q", got, want)
+	if got := splice([]byte(doubled), block); string(got) != want {
+		t.Fatalf("splice = %q, want %q", got, want)
 	}
-	if got := Strip([]byte(doubled)); string(got) != "*.log\nbetween\nafter\n" {
-		t.Fatalf("Strip = %q", got)
+	if got := strip([]byte(doubled)); string(got) != "*.log\nbetween\nafter\n" {
+		t.Fatalf("strip = %q", got)
 	}
 	path := filepath.Join(t.TempDir(), "exclude")
 	if err := os.WriteFile(path, []byte(doubled), 0o644); err != nil {

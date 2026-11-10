@@ -451,7 +451,7 @@ func TestConfigHookRunsDespiteHooksPath(t *testing.T) {
 	}
 	h.git(t, "config", "core.hooksPath", managed)
 	record := filepath.ToSlash(filepath.Join(base, "record"))
-	// The command ends without "$@", as hooks.Command does: git appends it.
+	// The command ends without "$@", as the config-defined hook does: git appends it.
 	h.git(t, "config", "hook.probe.command", `cat > '`+record+`.stdin'; printf '%s\n' "$#" > '`+record+`.args'; printf '%s\n' >> '`+record+`.args'`)
 	h.git(t, "config", "hook.probe.event", "pre-push")
 	h.git(t, "config", "hook.refuse.command", "exit 1")

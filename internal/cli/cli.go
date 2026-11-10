@@ -555,6 +555,19 @@ func (s *session) entry(name string) (inlay.Entry, error) {
 	return inlay.Entry{}, fmt.Errorf("no inlay named %q is attached to this worktree", name)
 }
 
+// selected returns the inlays a verb with an optional name applies to: the
+// one named, or every inlay attached to the current worktree.
+func (s *session) selected(names []string) ([]inlay.Entry, error) {
+	if len(names) == 0 {
+		return s.mine(), nil
+	}
+	e, err := s.entry(names[0])
+	if err != nil {
+		return nil, err
+	}
+	return []inlay.Entry{e}, nil
+}
+
 // refuseSparse rejects hosts with sparse checkout, which is unsupported.
 func (s *session) refuseSparse() error {
 	sparse, err := s.host.SparseCheckout()

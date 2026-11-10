@@ -339,7 +339,7 @@ func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string
 	if err != nil {
 		return nil, err
 	}
-	paths, err := OutgoingPaths(run, []RefUpdate{u}, remoteName, named)
+	paths, err := outgoingPaths(run, []RefUpdate{u}, remoteName, named)
 	if err != nil {
 		return nil, err
 	}
@@ -501,14 +501,14 @@ func ParseRefUpdates(r io.Reader) ([]RefUpdate, error) {
 	return out, sc.Err()
 }
 
-// OutgoingPaths lists every path added, changed or renamed by the commits
+// outgoingPaths lists every path added, changed or renamed by the commits
 // the updates would publish. Deletions are skipped: a commit that only
 // removes a claimed path publishes nothing new and is the documented fix.
 // When the remote side of an update is unknown locally, commits already on
 // the named remote are excluded; for an unnamed remote the whole history
 // behind the update is scanned. named says whether remoteName is a
 // configured remote; it is asked only when that fallback is taken.
-func OutgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, named func() bool) ([]string, error) {
+func outgoingPaths(run gitx.Runner, updates []RefUpdate, remoteName string, named func() bool) ([]string, error) {
 	run = pushed(run)
 	seen := map[string]bool{}
 	for _, u := range updates {
@@ -562,7 +562,7 @@ func Outgoing(h *host.Host, x *Index, updates []RefUpdate, remoteName string) ([
 		namesErr = err
 		return slices.Contains(names, remoteName)
 	})
-	paths, err := OutgoingPaths(h.Git(), updates, remoteName, named)
+	paths, err := outgoingPaths(h.Git(), updates, remoteName, named)
 	if err == nil {
 		err = namesErr
 	}

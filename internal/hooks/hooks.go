@@ -20,8 +20,8 @@ import (
 // Markers open and close a shim, which is how a hook file is recognized
 // as one git-inlay wrote.
 const (
-	Begin = "# >>> git-inlay >>>"
-	End   = "# <<< git-inlay <<<"
+	begin = "# >>> git-inlay >>>"
+	end   = "# <<< git-inlay <<<"
 )
 
 // guards lists the hooks that carry the host's leak guards.
@@ -90,18 +90,18 @@ func (r *Report) Fixable(s Status) bool {
 // by a GUI client that does not see the user's PATH. With neither in
 // place it fails closed.
 func Shim(sub string) string {
-	return fmt.Sprintf("#!/bin/sh\n%s\n%s \"$@\"\n%s\n", Begin, strings.Join(body(sub), "\n"), End)
+	return fmt.Sprintf("#!/bin/sh\n%s\n%s \"$@\"\n%s\n", begin, strings.Join(body(sub), "\n"), end)
 }
 
-// Command returns the host shim as one shell line, for a config-defined
+// command returns the host shim as one shell line, for a config-defined
 // hook. Git runs such a command through the shell and appends "$@" when
 // the hook has arguments, as it does for aliases, so the line ends
 // without them.
-func Command(sub string) string {
+func command(sub string) string {
 	return strings.Join(body(sub), "; ")
 }
 
-// body returns the lines shared by Shim and Command; each completes the
+// body returns the lines shared by Shim and command; each completes the
 // final exec with the hook's arguments.
 func body(sub string) []string {
 	// With the binary gone, hooks uninstall cannot run either, so the hint
@@ -298,8 +298,8 @@ func state(path string) State {
 // install would otherwise write over those lines and uninstall delete
 // them.
 func shim(data string) bool {
-	return strings.HasPrefix(data, "#!/bin/sh\n"+Begin+"\n") &&
-		strings.HasSuffix(strings.TrimRight(data, "\r\n"), End)
+	return strings.HasPrefix(data, "#!/bin/sh\n"+begin+"\n") &&
+		strings.HasSuffix(strings.TrimRight(data, "\r\n"), end)
 }
 
 // Runnable reports whether git would run the hook file at path: on every
@@ -429,7 +429,7 @@ func dropSection(run gitx.Runner, name string) error {
 // rewrite set, is overridden by an include later in the file, so writing
 // it afresh, at the end, puts it after the include.
 func configure(run gitx.Runner, name string, got map[string]string, rewrite bool) error {
-	want := map[string]string{"command": Command(name), "event": name, "enabled": "true"}
+	want := map[string]string{"command": command(name), "event": name, "enabled": "true"}
 	if !rewrite && maps.Equal(got, want) {
 		return nil
 	}

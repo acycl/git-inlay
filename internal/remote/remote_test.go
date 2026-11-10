@@ -17,13 +17,13 @@ func TestNormalizeEquivalents(t *testing.T) {
 		"https://github.com/acme/app.git",
 		"https://user@github.com/acme/app",
 	}
-	want := Normalize(same[0])
+	want := normalize(same[0])
 	if want != "github.com/acme/app" {
-		t.Fatalf("Normalize(%q) = %q", same[0], want)
+		t.Fatalf("normalize(%q) = %q", same[0], want)
 	}
 	for _, u := range same[1:] {
-		if got := Normalize(u); got != want {
-			t.Errorf("Normalize(%q) = %q, want %q", u, got, want)
+		if got := normalize(u); got != want {
+			t.Errorf("normalize(%q) = %q, want %q", u, got, want)
 		}
 	}
 	different := []string{"https://github.com/acme/app2", "https://gitlab.com/acme/app", "ssh://git@github.com:2222/acme/app2"}

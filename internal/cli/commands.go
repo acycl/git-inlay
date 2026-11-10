@@ -285,13 +285,9 @@ func (c *cli) ls(args []string) error {
 	if err != nil {
 		return err
 	}
-	entries := s.mine()
-	if len(pos) == 1 {
-		e, err := s.entry(pos[0])
-		if err != nil {
-			return err
-		}
-		entries = []inlay.Entry{e}
+	entries, err := s.selected(pos)
+	if err != nil {
+		return err
 	}
 	if len(entries) == 0 {
 		if *porcelain {

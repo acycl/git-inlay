@@ -312,7 +312,7 @@ func (c *cli) hookInlayPrePush(args []string) error {
 		}
 		h = host.Detached(common, c.o.Env)
 	}
-	in := &inlay.Inlay{Name: name, Key: h.Key, GitDir: gitDir, Host: h}
+	in := &inlay.Inlay{Name: name, GitDir: gitDir, Host: h}
 
 	remoteName, url := "", ""
 	if len(args) > 0 {

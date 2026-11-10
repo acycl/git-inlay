@@ -34,13 +34,9 @@ func (c *cli) restore(args []string) error {
 	if err != nil {
 		return err
 	}
-	entries := s.mine()
-	if len(args) == 1 {
-		e, err := s.entry(args[0])
-		if err != nil {
-			return err
-		}
-		entries = []inlay.Entry{e}
+	entries, err := s.selected(args)
+	if err != nil {
+		return err
 	}
 	total := 0
 	for _, e := range entries {
@@ -297,13 +293,9 @@ func (c *cli) status(args []string) error {
 	if err != nil {
 		return err
 	}
-	entries := s.mine()
-	if len(pos) == 1 {
-		e, err := s.entry(pos[0])
-		if err != nil {
-			return err
-		}
-		entries = []inlay.Entry{e}
+	entries, err := s.selected(pos)
+	if err != nil {
+		return err
 	}
 	if len(entries) == 0 && !*porcelain {
 		c.printf("no inlays are attached to this worktree\n")
