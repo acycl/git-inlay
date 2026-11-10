@@ -66,14 +66,14 @@ func TestMain(m *testing.M) {
 // fixture is a host repository with a local bare remote and an isolated git
 // environment that has git-inlay on PATH.
 type fixture struct {
-	t      *testing.T
+	t      testing.TB
 	base   string
 	root   string
 	remote string
 	env    []string
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t testing.TB) *fixture {
 	t.Helper()
 	base := t.TempDir()
 	home := filepath.Join(base, "home")
@@ -200,7 +200,7 @@ func (f *fixture) bare(name string) string {
 	return p
 }
 
-func writeFile(t *testing.T, path, content string) {
+func writeFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func contains(t *testing.T, got, want, what string) {
+func contains(t testing.TB, got, want, what string) {
 	t.Helper()
 	if !strings.Contains(got, want) {
 		t.Fatalf("%s does not mention %q:\n%s", what, want, got)
@@ -1105,7 +1105,7 @@ func TestLeakGuards(t *testing.T) {
 }
 
 // configHooks reports whether git runs config-defined hooks (git 2.54).
-func configHooks(t *testing.T) bool {
+func configHooks(t testing.TB) bool {
 	t.Helper()
 	ok, err := gitx.Runner{}.AtLeast(2, 54)
 	if err != nil {

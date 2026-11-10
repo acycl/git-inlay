@@ -687,7 +687,7 @@ func (f *fixture) claude(bin string, extra []string, args ...string) string {
 	return out.String()
 }
 
-func readAt(t *testing.T, dir, rel string) string {
+func readAt(t testing.TB, dir, rel string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
 	if err != nil {
