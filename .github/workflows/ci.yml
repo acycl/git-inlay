@@ -114,3 +114,8 @@ jobs:
           grep -qx git-inlay "$RUNNER_TEMP/contents.txt"
           grep -qx LICENSE "$RUNNER_TEMP/contents.txt"
           grep -qx man/git-inlay.1 "$RUNNER_TEMP/contents.txt"
+      - name: smoke-test the binary from the archive
+        run: |
+          mkdir "$RUNNER_TEMP/release"
+          tar -xzf dist/git-inlay_*_linux_amd64.tar.gz -C "$RUNNER_TEMP/release"
+          scripts/smoke.sh "$RUNNER_TEMP/release"
