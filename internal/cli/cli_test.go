@@ -1772,6 +1772,30 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	}
 }
 
+// detach deletes what lies under the inlay's claims and nothing else: a
+// file the inlay came to track outside them, by a slip such as add -f, is
+// most likely the host's and stays.
+func TestDetachLeavesStrays(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude", "--no-hooks")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "claude", "notes")
+	f.write("scratch.txt", "the host's work in progress\n")
+	f.inlayOK(f.root, "claude", "add", "-f", "scratch.txt")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "notes and a slip")
+
+	out, errOut, code := f.inlay(f.root, "detach", "claude", "--force")
+	if code != 0 {
+		t.Fatalf("detach: exit %d\n%s", code, errOut)
+	}
+	contains(t, out, "detached inlay claude; 2 file(s) removed", "detach output")
+	contains(t, errOut, "left 1 file(s) the inlay tracked outside its claims, which may be the host's: scratch.txt", "detach warning")
+	if !f.exists("scratch.txt") || f.exists("notes/a.md") {
+		t.Fatal("detach deleted the wrong files")
+	}
+}
+
 // A claimed directory may hold more files than a command line carries, so
 // claim stages them through stdin and detach asks the host by claim.
 func TestClaimAndDetachLargeDirectory(t *testing.T) {

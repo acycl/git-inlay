@@ -100,7 +100,8 @@ git inlay detach <name> [--force] [--keep-files]
 
 Removes an inlay from this worktree, and its tracked files from the tree
 unless `--keep-files` is given. A file the host also tracks is never
-deleted. Uncommitted changes, stashes, and commits on no remote stop the
+deleted, nor is one the inlay tracks outside its claims; `detach` names
+what it leaves. Uncommitted changes, stashes, and commits on no remote stop the
 command unless `--force` is given.
 
 ## Claims

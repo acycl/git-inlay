@@ -132,20 +132,14 @@ func (c *cli) detach(args []string) error {
 		return err
 	}
 	removed := 0
-	var shared []string
+	var shared, strays []string
 	if !*keep {
 		// A file the host also tracks (I3 broken by an upstream commit, say)
 		// is the host's to delete, not ours. The host is asked by claim, not
-		// by file, of which there may be more than a command line carries;
-		// only a file the inlay tracks outside its claims is named itself.
+		// by file, of which there may be more than a command line carries.
 		var specs []string
 		for _, cl := range e.Manifest.All() {
 			specs = append(specs, cl.Pathspec())
-		}
-		for _, p := range files {
-			if _, ok := e.Manifest.Owner(p); !ok {
-				specs = append(specs, ":(literal)"+p)
-			}
 		}
 		hostTracked, err := s.host.Tracked(specs...)
 		if err != nil {
@@ -175,6 +169,13 @@ func (c *cli) detach(args []string) error {
 			hostOwned[key(p)] = true
 		}
 		for _, p := range files {
+			// A file the inlay tracks outside its claims got there by a
+			// slip such as "add -f .", and is most likely the host's, which
+			// may not track it either: it stays.
+			if _, ok := e.Manifest.Owner(p); !ok {
+				strays = append(strays, p)
+				continue
+			}
 			if hostOwned[key(p)] {
 				shared = append(shared, p)
 				continue
@@ -203,6 +204,9 @@ func (c *cli) detach(args []string) error {
 	c.printf("detached inlay %s; %d file(s) removed\n", name, removed)
 	if len(shared) > 0 {
 		c.warnf("left %d file(s) the host also tracks: %s", len(shared), summarize(shared))
+	}
+	if len(strays) > 0 {
+		c.warnf("left %d file(s) the inlay tracked outside its claims, which may be the host's: %s", len(strays), summarize(strays))
 	}
 	return nil
 }
