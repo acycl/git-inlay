@@ -138,11 +138,11 @@ enforce them as you work:
 Remote comparison looks through spelling: `git@host:a/b`,
 `ssh://git@host/a/b` and `https://host/a/b` are the same repository, with
 or without a trailing `.git`, and git's `insteadOf` rewrites are applied.
-A port sets two URLs apart only when both use the same transport, so
-`https://host/a/b` and `ssh://git@host:2222/a/b` are still one repository.
-What the comparison cannot see through is a name that only your machine
-resolves: a `Host` alias in `~/.ssh/config`, or a second hostname for the
-same server.
+A port sets two URLs apart only when both name one for the same transport,
+so `https://host/a/b`, `git@host:a/b` and `ssh://git@host:2222/a/b` are
+still one repository. What the comparison cannot see through is a name
+that only your machine resolves: a `Host` alias in `~/.ssh/config`, or a
+second hostname for the same server.
 
 ## What git-inlay does not do
 
@@ -169,7 +169,8 @@ consequences:
 - **A host `.gitignore` that re-includes a host file** (`!.env.example`)
   outranks the inlay's exclude file too, so the inlay sees that file as
   untracked when it sits at the root of the tree or directly inside a
-  directory that leads to a claim. `git inlay check` warns about such
+  directory that leads to a claim. A pattern that re-includes a whole
+  directory there (`!/src/`) shows the inlay everything in it. `git inlay check` warns about such
   files. Keep them out of `git inlay <name> add`; `git inlay <name> clean`
   and `stash -u`, which would take them, are refused while any exist.
 

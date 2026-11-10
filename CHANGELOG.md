@@ -14,6 +14,10 @@ change behaviour.
 - `init` sets the inlay up so that its first `git inlay <name> push` needs
   no `-u origin main`.
 
+- The hooks, `git inlay <name> ...` and `attach --all` start fewer git
+  processes: a commit's guard two where it started three, a read-only
+  passthrough command two where it started five.
+
 ### Fixed
 
 - `git inlay <name> clean` and `stash -u` are refused while the inlay
@@ -21,7 +25,9 @@ change behaviour.
   re-includes them causes; `clean -fd` used to delete such files. `check`
   warns about them, and `detach` no longer takes them for uncommitted work.
 - The remote guard recognizes the host's repository behind a different
-  port (`https://host/a/b` and `ssh://git@host:2222/a/b`), behind an
+  port (`https://host/a/b`, `git@host:a/b` and `ssh://git@host:2222/a/b`
+  are one repository; only two ports named for one transport tell
+  repositories apart), behind an
   `insteadOf` alias that does not look like a URL, and through a symbolic
   link; a relative path given to `init --remote` or `clone` is read from
   the current directory.

@@ -66,13 +66,16 @@ guards included. The exception is git run against that inlay, which is
 how you put it right:
 
 ```sh
-git inlay <name> status
-git inlay <name> checkout -- .git-inlay/<name>.paths   # back to the committed manifest
-git inlay <name> merge --abort                         # or give up the merge
+git inlay <name> status                               # what state is it in?
+git inlay <name> checkout -- .git-inlay/<name>.paths  # undo a hand edit
+git inlay <name> merge --abort                        # give up a merge that conflicted
+git inlay <name> reset --hard ORIG_HEAD               # undo a pull that brought the bad line
 ```
 
-For a conflict, you can also edit the file, keep the claims of both sides,
-remove the marker lines, and `git inlay <name> add` it.
+The last discards uncommitted changes to the inlay's files, so commit or
+stash them first. To resolve a conflict instead of abandoning the merge,
+edit the file, keep the claims of both sides, remove the marker lines, and
+`git inlay <name> add` it.
 
 ### `<path> is tracked by the host`
 

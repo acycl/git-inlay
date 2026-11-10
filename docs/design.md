@@ -345,8 +345,9 @@ commit the framework sets neither ref; the guard then scans
 
 Remote comparison normalizes URLs before comparing: scp-like `git@host:a/b`,
 `ssh://git@host/a/b`, and `https://host/a/b` compare equal; a trailing `.git`
-and trailing slashes are ignored; a port counts only between URLs of one
-transport, since a server's https and ssh ports differ by nature. The
+and trailing slashes are ignored; a port counts only when both URLs name one
+for the same transport, since a server's https and ssh ports differ by
+nature and `~/.ssh/config` can set the port of a URL that names none. The
 `insteadOf` rewrites of configured remotes are applied from the
 configuration, and those of a URL given on the command line by asking git
 with `git ls-remote --get-url <url>`.
@@ -870,7 +871,8 @@ fails there rather than at tag time.
   ignored files silently. In the other direction, a host pattern that
   re-includes a host file (`!.env.example`) shows it to the inlay as
   untracked when it lies at the root or directly inside a directory the
-  negation chain re-includes. Nothing can outrank that, so `check` warns,
+  negation chain re-includes, and a re-included directory there shows it
+  all it holds. Nothing can outrank that, so `check` warns,
   `detach` does not count such files as the inlay's work, and the
   passthrough refuses `clean` (unless a dry run) and `stash -u` while any
   exist.
