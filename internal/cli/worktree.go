@@ -41,6 +41,10 @@ func (c *cli) attach(args []string) error {
 	}
 	if *all {
 		names = s.siblingNames()
+		if len(names) == 0 && len(s.mine()) > 0 {
+			c.printf("every inlay of this host is already attached to this worktree; if their files are missing, run: git inlay restore\n")
+			return nil
+		}
 		if len(names) == 0 {
 			c.printf("no inlays are attached to other worktrees of this host\n")
 			return nil

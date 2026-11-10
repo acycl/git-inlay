@@ -546,6 +546,29 @@ func TestAutoAttachInNewWorktree(t *testing.T) {
 	}
 }
 
+// Git names a worktree after its directory, so one made where another was
+// removed, and never pruned, inherits that one's inlays. The attach hook
+// then brings their files back, and attach --all says where they are.
+func TestRecreatedWorktreeGetsItsFiles(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	f.inlayOK(f.root, "hooks", "install", "--auto-attach")
+
+	wt := filepath.Join(f.base, "wts", "feat")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feat")
+	f.git(f.root, "worktree", "remove", "--force", wt)
+	f.git(f.root, "worktree", "add", "-q", wt, "feat")
+	if got := readAt(t, wt, ".claude/settings.json"); got != "{}\n" {
+		t.Fatalf("settings in the re-created worktree = %q", got)
+	}
+	contains(t, f.inlayOK(wt, "attach", "--all"), "already attached to this worktree", "attach --all in the re-created worktree")
+	contains(t, f.inlayOK(wt, "check"), "ok:", "check in the re-created worktree")
+}
+
 // An inlay whose name is a verb could never be reached by passthrough, so
 // clone refuses one.
 func TestCloneRefusesVerbName(t *testing.T) {
@@ -1678,7 +1701,7 @@ func TestWorktreeAttachAndPrune(t *testing.T) {
 	if got := readAt(t, wt, "notes/a.md"); got != "a\n" {
 		t.Fatalf("notes in the worktree = %q", got)
 	}
-	if got := f.inlayOK(wt, "attach", "--all"); got != "no inlays are attached to other worktrees of this host" {
+	if got := f.inlayOK(wt, "attach", "--all"); !strings.HasPrefix(got, "every inlay of this host is already attached to this worktree") {
 		t.Fatalf("attach --all with nothing left = %q", got)
 	}
 	if got := f.inlayOK(f.root, "prune"); got != "nothing to prune" {

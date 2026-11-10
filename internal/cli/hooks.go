@@ -152,16 +152,27 @@ func (c *cli) hook(args []string) error {
 // anything, a coding agent's session say, starts in it. Git runs
 // post-checkout there with the null id as the previous HEAD and the branch
 // flag set; so does a checkout that leaves an unborn branch, where attaching
-// is as harmless, since attach never overwrites a file. It does
-// nothing where an inlay is already attached or no other worktree has
-// one, and it never fails: its exit status would become the checkout's,
+// is as harmless, since attach never overwrites a file. Inlays already
+// attached there get their missing files back, and it never fails: its exit status would become the checkout's,
 // and attach --all remains the way to do the same by hand.
 func (c *cli) hookPostCheckout(args []string) {
 	if len(args) != 3 || !guard.IsZero(args[0]) || args[2] != "1" {
 		return
 	}
 	s, err := c.load()
-	if err != nil || len(s.mine()) > 0 || len(s.siblingNames()) == 0 {
+	if err != nil {
+		return
+	}
+	if len(s.mine()) > 0 {
+		// Git names a worktree after its directory, so a new one at the
+		// path of one that was removed and never pruned finds that one's
+		// inlays attached to it, with none of their files in the tree.
+		if err := c.restore(nil); err != nil {
+			c.warnf("could not restore the files of the inlays attached to this worktree: %v", err)
+			c.warnf("once that is resolved, run: git inlay restore")
+		}
+	}
+	if len(s.siblingNames()) == 0 {
 		return
 	}
 	if err := c.attach([]string{"--all"}); err != nil {
