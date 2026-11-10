@@ -799,11 +799,14 @@ against it. Supported floor: git 2.40, chosen for `--git-common-dir` and
 worktree stability; raise it if a needed feature requires more. macOS runs
 exercise a case-insensitive filesystem. No job uses the race detector: no
 production code starts a goroutine, and the end-to-end tests run in
-parallel against a binary built without it. The Linux job also rebuilds
+parallel against a binary built without it. The Linux job builds
 that binary for coverage (`GOCOVERDIR`, see `TestMain`) and prints the
-end-to-end coverage per package with `go tool covdata percent`. Every
+end-to-end coverage per package with `go tool covdata percent`. The
+workflow also runs weekly, for what changes while the repository does
+not: vulnerability advisories and the runners' git. Every
 action is pinned to a commit SHA with its version in a trailing comment,
-which Dependabot keeps current; the oldest-git job checks the git tarball
+which Dependabot keeps current, and GoReleaser to an exact version,
+which it cannot see and is bumped by hand; the oldest-git job checks the git tarball
 against kernel.org's published SHA-256 before building; a govulncheck job
 scans the module and the standard library it uses. `go.mod` names the
 oldest Go the code builds with (1.24, for `strings.Lines` and
@@ -817,10 +820,15 @@ Code contract test skips on every runner, since none
 has the `claude` binary.
 Releases (`.github/workflows/release.yml`, `.goreleaser.yaml`) build
 linux, darwin and windows binaries for amd64 and arm64 on a `v*` tag and
-open a draft release. A snapshot job in the CI workflow runs the same
-goreleaser build without publishing on every push, so a broken release
-config fails there rather than at tag time, and checks that the
-archives carry `LICENSE` (Apache-2.0).
+open a draft release, once the CI workflow, which the release workflow
+calls, has passed on the tagged commit. Before the provenance is attested,
+`scripts/check-archives.sh` checks that all six archives carry the
+binary, `LICENSE` (Apache-2.0) and the manual page, and
+`scripts/smoke-archive.sh` runs `scripts/smoke.sh` on the binary from
+the linux/amd64 archive, holding it to the tag's version. A snapshot job
+in the CI workflow runs the same goreleaser build and the same two
+scripts without publishing on every push, so a broken release config
+fails there rather than at tag time.
 
 ## 9. Risks and open questions
 

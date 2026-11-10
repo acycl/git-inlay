@@ -4,9 +4,21 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs these jobs before it builds anything.
+  workflow_call:
+  workflow_dispatch:
+  # Weekly, for what changes while the repository does not: Go
+  # vulnerability advisories, runner images and the git they carry.
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
+
+# A newer push to a pull request supersedes the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -28,13 +40,21 @@ jobs:
       - run: go build ./...
       # No -race: no production code starts a goroutine, and the end-to-end
       # tests run a binary built without it.
-      - run: go test -count=1 ./...
-      - name: end-to-end coverage
-        if: runner.os == 'Linux'
+      # On Linux the end-to-end suite runs once, with the binary it drives
+      # built for coverage; elsewhere everything runs plainly.
+      - name: test
+        shell: bash
         run: |
+          if [ "$RUNNER_OS" != Linux ]; then
+            go test -count=1 ./...
+            exit
+          fi
+          go list ./... | grep -v '/internal/cli$' | xargs go test -count=1
           mkdir -p "$RUNNER_TEMP/cov"
           GOCOVERDIR="$RUNNER_TEMP/cov" go test -count=1 ./internal/cli
-          go tool covdata percent -i="$RUNNER_TEMP/cov"
+      - name: end-to-end coverage
+        if: runner.os == 'Linux'
+        run: go tool covdata percent -i="$RUNNER_TEMP/cov"
 
   gofmt:
     runs-on: ubuntu-latest
@@ -106,16 +126,9 @@ jobs:
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.19.0 # exact, and bumped by hand: Dependabot does not see it
           args: release --snapshot --clean
-      - name: check an archive carries the binary, the license and the man page
-        run: |
-          tar -tzf dist/git-inlay_*_linux_amd64.tar.gz | tee "$RUNNER_TEMP/contents.txt"
-          grep -qx git-inlay "$RUNNER_TEMP/contents.txt"
-          grep -qx LICENSE "$RUNNER_TEMP/contents.txt"
-          grep -qx man/git-inlay.1 "$RUNNER_TEMP/contents.txt"
+      - name: check every archive carries the binary, the license and the man page
+        run: scripts/check-archives.sh dist
       - name: smoke-test the binary from the archive
-        run: |
-          mkdir "$RUNNER_TEMP/release"
-          tar -xzf dist/git-inlay_*_linux_amd64.tar.gz -C "$RUNNER_TEMP/release"
-          scripts/smoke.sh "$RUNNER_TEMP/release"
+        run: scripts/smoke-archive.sh dist
