@@ -70,9 +70,21 @@ func (c Claim) Ancestors() []string {
 // directory, everything beneath it.
 func (c Claim) Pathspec() string { return ":(literal)" + c.Path }
 
-// ParseClaim parses a root-relative path as written on the command line or
-// in a manifest. A trailing slash marks a directory.
+// ParseClaim parses a root-relative path as written on the command line.
+// A trailing slash marks a directory. It refuses what no new claim may
+// hold, a control character among it; Parse is laxer with a claim that a
+// manifest already holds.
 func ParseClaim(s string) (Claim, error) {
+	c, err := parseClaim(s)
+	if err == nil && strings.ContainsFunc(c.Path, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		// A tab would also break the tab-separated output of ls and which.
+		err = fmt.Errorf("invalid path %q: contains a control character", s)
+	}
+	return c, err
+}
+
+// parseClaim parses a claim as a manifest writes it.
+func parseClaim(s string) (Claim, error) {
 	c := Claim{Path: s}
 	if strings.HasSuffix(s, "/") {
 		c.Dir = true
@@ -91,9 +103,9 @@ func ValidatePath(p string) error {
 		return errors.New("empty path")
 	case strings.ContainsAny(p, "\r\n"):
 		return errors.New("contains a line break")
-	case strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }):
-		// A tab would also break the tab-separated output of ls and which.
-		return errors.New("contains a control character")
+	case strings.Contains(p, "\x00"):
+		// What a file saved as UTF-16 is full of; no path can hold one.
+		return errors.New("contains a NUL byte")
 	case strings.HasPrefix(p, "#"):
 		return errors.New("starts with '#'")
 	case p != strings.TrimSpace(p):
@@ -151,7 +163,9 @@ func conflictMarker(line string) bool {
 
 // Parse reads a manifest file. Blank lines and '#' comments are ignored, a
 // byte order mark is skipped, and a claim already covered by an earlier
-// one is dropped.
+// one is dropped. A claim with a control character other than NUL is read
+// as it stands, since a manifest written before ParseClaim refused such
+// claims must not lock its inlay.
 func Parse(name string, data []byte) (*Manifest, error) {
 	m := New(name)
 	n := 0
@@ -164,7 +178,7 @@ func Parse(name string, data []byte) (*Manifest, error) {
 		if conflictMarker(line) {
 			return nil, fmt.Errorf("%s line %d: %w", File(name), n, ErrConflict)
 		}
-		c, err := ParseClaim(line)
+		c, err := parseClaim(line)
 		if err != nil {
 			return nil, fmt.Errorf("%s line %d: %w", File(name), n, err)
 		}

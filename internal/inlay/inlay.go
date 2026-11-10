@@ -234,7 +234,7 @@ func readManifest(root string, run gitx.Runner, name string, lenient bool) (*man
 // commit or file yields an empty manifest; any other failure is an error,
 // so a broken inlay never silently loses its claims.
 func ManifestAt(run gitx.Runner, name, rev string) (*manifest.Manifest, error) {
-	ms, err := ManifestsAt(run, name, []string{rev})
+	ms, err := ManifestsAt(run, name, []string{rev}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,11 @@ func ManifestAt(run gitx.Runner, name, rev string) (*manifest.Manifest, error) {
 }
 
 // ManifestsAt is ManifestAt for several revs at the cost of one process.
-func ManifestsAt(run gitx.Runner, name string, revs []string) ([]*manifest.Manifest, error) {
+// With lenient set, a manifest that does not parse counts as empty, which
+// is how commits of the past are judged: one that carries a manifest with
+// conflict markers claimed nothing, and must not pass for a fault of the
+// manifest in the tree.
+func ManifestsAt(run gitx.Runner, name string, revs []string, lenient bool) ([]*manifest.Manifest, error) {
 	if len(revs) == 0 {
 		return nil, nil
 	}
@@ -280,7 +284,10 @@ func ManifestsAt(run gitx.Runner, name string, revs []string) ([]*manifest.Manif
 		}
 		size = min(size, len(out))
 		if ms[i], err = manifest.Parse(name, []byte(out[:size])); err != nil {
-			return nil, err
+			if !lenient {
+				return nil, fmt.Errorf("at %s: %w", rev, err)
+			}
+			ms[i] = manifest.New(name)
 		}
 		out = strings.TrimPrefix(out[size:], "\n")
 	}

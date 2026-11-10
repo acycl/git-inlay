@@ -385,7 +385,7 @@ func OutgoingStrays(run gitx.Runner, name string, u RefUpdate, remoteName string
 		return out, nil
 	}
 	commits := strings.Split(listed, "\n")
-	manifests, err := inlay.ManifestsAt(run, name, commits)
+	manifests, err := inlay.ManifestsAt(run, name, commits, true)
 	if err != nil {
 		return nil, err
 	}

@@ -133,9 +133,19 @@ func TestParseRefusesNonClaims(t *testing.T) {
 	if _, err := Parse("x", []byte("=======.md\n")); err != nil {
 		t.Errorf("Parse of a path that starts like a marker: %v", err)
 	}
-	for _, bad := range []string{"a\x00b", "a\tb", "n\x00o\x00t\x00e\x00", "a\x7fb"} {
-		if _, err := Parse("x", []byte(bad+"\n")); err == nil || !strings.Contains(err.Error(), "control character") {
-			t.Errorf("Parse(%q) = %v, want a control character error", bad, err)
+	for _, bad := range []string{"a\x00b", "n\x00o\x00t\x00e\x00"} {
+		if _, err := Parse("x", []byte(bad+"\n")); err == nil || !strings.Contains(err.Error(), "NUL byte") {
+			t.Errorf("Parse(%q) = %v, want a NUL byte error", bad, err)
+		}
+	}
+	// A new claim may hold no control character; one a manifest already
+	// holds is read, so that an upgrade does not lock its inlay.
+	for _, odd := range []string{"a\tb", "a\x7fb"} {
+		if _, err := ParseClaim(odd); err == nil || !strings.Contains(err.Error(), "control character") {
+			t.Errorf("ParseClaim(%q) = %v, want a control character error", odd, err)
+		}
+		if m, err := Parse("x", []byte(odd+"\n")); err != nil || len(m.Claims) != 1 || m.Claims[0].Path != odd {
+			t.Errorf("Parse(%q) = %v, %v; want the claim as it stands", odd, m, err)
 		}
 	}
 }
