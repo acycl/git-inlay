@@ -57,10 +57,10 @@ or push is refused.
 
 ### Beside a hook manager or an existing hook
 
-If `core.hooksPath` is set (husky, lefthook and the pre-commit framework
-set it or own the hooks directory), or a hook that git-inlay did not write
-is already in place, the shim cannot go there. What `hooks install` does
-then depends on the git version.
+If `core.hooksPath` is set, as husky does, or a hook that git-inlay did
+not write is already in place, as with lefthook and the pre-commit
+framework, which write their own into the hooks directory, the shim cannot
+go there. What `hooks install` does then depends on the git version.
 
 **Git 2.54 or newer.** It adds the guards as config-defined hooks in the
 host's `.git/config`:
@@ -75,8 +75,12 @@ host's `.git/config`:
 Git runs these beside the other hooks, whatever `core.hooksPath` says, and
 the commit or push fails if either refuses.
 
-**Older git.** It writes nothing and prints the lines to add to the hook
-manager, chosen by what it finds in the repository.
+**Older git.** It writes nothing and prints what to add by hand. Where it
+finds a hook manager's files in the repository, those are the lines for
+that manager's configuration; for any other hook already in place, it is
+the line to add to that hook. The pre-push guard needs the arguments git
+gives the hook, and the refs git writes to its stdin, which is why the
+snippets differ.
 
 husky:
 
@@ -95,7 +99,7 @@ pre-commit:
 pre-push:
   commands:
     git-inlay:
-      run: git-inlay hook pre-push
+      run: git-inlay hook pre-push {0}
       use_stdin: true
 ```
 
@@ -118,6 +122,13 @@ The pre-commit framework, in `.pre-commit-config.yaml`:
       pass_filenames: false
       always_run: true
       stages: [pre-push]
+```
+
+and install its pre-push hook, which `pre-commit install` alone leaves
+out:
+
+```sh
+pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 Any other hook: run `git-inlay hook pre-commit` from the pre-commit hook,

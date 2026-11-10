@@ -98,3 +98,18 @@ func TestCommandAndShim(t *testing.T) {
 		}
 	}
 }
+
+// Every snippet hands the pre-push guard the hook's arguments, the remote's
+// name first, or says how the manager supplies them otherwise.
+func TestSnippetPassesPrePushArguments(t *testing.T) {
+	for manager, want := range map[string]string{
+		"husky":      `git-inlay hook pre-push "$@"`,
+		"lefthook":   "run: git-inlay hook pre-push {0}\n        use_stdin: true",
+		"pre-commit": "pre-commit install --hook-type pre-commit --hook-type pre-push",
+		"":           `git-inlay hook pre-push "$@"   with git's stdin forwarded`,
+	} {
+		if got := Snippet(manager); !strings.Contains(got, want) {
+			t.Errorf("Snippet(%q) lacks %q:\n%s", manager, want, got)
+		}
+	}
+}

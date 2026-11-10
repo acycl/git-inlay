@@ -101,6 +101,14 @@ func (c *cli) hooks(args []string) error {
 		case st.State == hooks.Managed && !snippet:
 			snippet = true
 			c.printf("\ncore.hooksPath is %s, so %s", r.HooksPath, hooks.Snippet(hooks.Manager(s.host.Root)))
+		case st.State == hooks.Foreign && hooks.Manager(s.host.Root) != "":
+			// Lefthook and the pre-commit framework write their hooks into
+			// the hooks directory and rewrite them, so a line added to
+			// one would not last: the guard goes into their configuration.
+			if !snippet {
+				snippet = true
+				c.printf("\n%s is not managed by git-inlay, and %s", st.Path, hooks.Snippet(hooks.Manager(s.host.Root)))
+			}
 		case st.State == hooks.Foreign:
 			c.printf("\n%s exists and is not managed by git-inlay; add to it:\n  git-inlay hook %s \"$@\"\n", st.Path, st.Hook)
 		}
@@ -218,6 +226,14 @@ func (c *cli) hookPrePush(args []string) error {
 // framework's variables when it set them, otherwise from git's stdin.
 func (c *cli) refUpdates() ([]guard.RefUpdate, error) {
 	to, from := c.env("PRE_COMMIT_TO_REF"), c.env("PRE_COMMIT_FROM_REF")
+	if to == "" && c.env("PRE_COMMIT_REMOTE_NAME") != "" {
+		// The framework names no range when the push carries a root
+		// commit, and keeps git's stdin to itself. What it pushes is the
+		// branch, or HEAD; the guard leaves out what the remote has.
+		if to = c.env("PRE_COMMIT_LOCAL_BRANCH"); to == "" {
+			to = "HEAD"
+		}
+	}
 	if to != "" {
 		if from == "" {
 			from = strings.Repeat("0", 40)

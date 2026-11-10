@@ -1050,6 +1050,26 @@ func TestForeignHookLeftAlone(t *testing.T) {
 	contains(t, f.read(".git/hooks/pre-commit"), "hook pre-commit", "pre-commit shim")
 }
 
+// Lefthook and the pre-commit framework write their hooks into the hooks
+// directory, where a line added by hand would not last, so below git 2.54
+// install prints the lines for the manager's own configuration.
+func TestForeignHookOfManager(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("lefthook.yml", "pre-push:\n  commands: {}\n")
+	f.write(".git/hooks/pre-push", "#!/bin/sh\nexit 0\n")
+	out := f.inlayOK(f.root, "hooks", "install")
+	if configHooks(t) {
+		contains(t, out, "pre-push    configured hook.git-inlay-pre-push", "install output")
+		return
+	}
+	contains(t, out, "lefthook manages the hooks", "install output")
+	contains(t, out, "run: git-inlay hook pre-push {0}", "install output")
+	if strings.Contains(out, "add to it") {
+		t.Fatalf("install tells the user to edit a hook lefthook rewrites:\n%s", out)
+	}
+}
+
 // On git 2.54 and newer, hooks install guards a host whose hooks a manager
 // owns through config-defined hooks that run beside the manager's, and
 // check reports a guard that is missing or disabled.
@@ -1775,9 +1795,9 @@ func TestClaimAndDetachLargeDirectory(t *testing.T) {
 	}
 }
 
-// Hook scripts under core.hooksPath that call the guards, as the husky and
-// lefthook snippets do, refuse leaks at commit and at push with git's
-// stdin forwarded.
+// Hook scripts under core.hooksPath that call the guards with the hook's
+// arguments, as the husky snippet does and as lefthook's {0} amounts to,
+// refuse leaks at commit and at push with git's stdin forwarded.
 func TestHooksPathScriptsRunGuards(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1838,9 +1858,17 @@ func TestPreCommitFrameworkProtocol(t *testing.T) {
 	if _, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push"); code != 1 {
 		t.Fatalf("pre-push of a new branch via the framework: exit %d\n%s", code, errOut)
 	}
+	// A push that carries a root commit has no range at all, only the
+	// remote and the branch.
+	whole := []string{"PRE_COMMIT_REMOTE_NAME=origin", "PRE_COMMIT_LOCAL_BRANCH=refs/heads/main"}
+	if _, errOut, code := f.runWith(f.root, whole, "git", "inlay", "hook", "pre-push"); code != 1 {
+		t.Fatalf("pre-push of a whole history via the framework: exit %d\n%s", code, errOut)
+	}
 	f.git(f.root, "push", "-q", "origin", "main")
-	if _, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push"); code != 0 {
-		t.Fatalf("pre-push with everything on the remote: exit %d\n%s", code, errOut)
+	for _, env := range [][]string{env, whole} {
+		if _, errOut, code := f.runWith(f.root, env, "git", "inlay", "hook", "pre-push"); code != 0 {
+			t.Fatalf("pre-push with everything on the remote: exit %d\n%s", code, errOut)
+		}
 	}
 }
 

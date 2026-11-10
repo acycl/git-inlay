@@ -476,7 +476,12 @@ func Manager(root string) string {
 	return ""
 }
 
-// Snippet explains how to call the guards from a hook manager.
+// Snippet explains how to call the guards from a hook manager. The
+// pre-push guard needs what git gives the hook: the remote's name as the
+// first argument, without which it cannot leave out the commits the remote
+// already has, and the pushed refs on stdin. Husky scripts get both;
+// lefthook passes the arguments as {0} and stdin on request; the
+// pre-commit framework passes neither and sets PRE_COMMIT_* variables.
 func Snippet(manager string) string {
 	switch manager {
 	case "husky":
@@ -493,7 +498,7 @@ func Snippet(manager string) string {
   pre-push:
     commands:
       git-inlay:
-        run: git-inlay hook pre-push
+        run: git-inlay hook pre-push {0}
         use_stdin: true
 `
 	case "pre-commit":
@@ -514,6 +519,8 @@ func Snippet(manager string) string {
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+and install its pre-push hook, which pre-commit install alone leaves out:
+  pre-commit install --hook-type pre-commit --hook-type pre-push
 `
 	}
 	return `hooks there are not managed by git-inlay. From them:

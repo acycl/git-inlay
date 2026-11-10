@@ -334,7 +334,9 @@ Guards:
 
 The pre-push input is accepted in two forms: the stdin lines git provides, and the
 `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and `PRE_COMMIT_REMOTE_NAME`
-variables set by the pre-commit framework.
+variables set by the pre-commit framework. For a push that carries a root
+commit the framework sets neither ref; the guard then scans
+`PRE_COMMIT_LOCAL_BRANCH`, or `HEAD`, less what the remote has.
 
 Remote comparison normalizes URLs before comparing: scp-like `git@host:a/b`,
 `ssh://git@host/a/b`, and `https://host/a/b` compare equal; a trailing `.git`
@@ -528,7 +530,12 @@ tool, so the default is to have them.
 - Below git 2.54, where the shim cannot go: write nothing and print the
   snippet for the detected manager (husky from `.husky/`, lefthook from
   `lefthook.yml`, the pre-commit framework from `.pre-commit-config.yaml`,
-  otherwise generic), or the line to add to a foreign hook. Chaining a
+  otherwise generic), for a hooks path and for a foreign hook alike, since
+  lefthook and the pre-commit framework write theirs into the hooks
+  directory; a foreign hook with no manager in sight gets the line to add
+  to it. The lefthook snippet passes the hook's arguments as `{0}`: without
+  the remote's name every push of a new branch would scan the whole
+  history. Chaining a
   pre-push hook by appending is unsafe because both scripts would read
   stdin.
 
@@ -754,7 +761,8 @@ that call the guards, which is what husky and lefthook run, refuse leaks
 at commit and at push; the pre-commit framework's protocol, no stdin and
 the range in `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and
 `PRE_COMMIT_REMOTE_NAME`, is driven directly, including the new-branch
-case without `FROM_REF`. The tools themselves are not installed in the
+case without `FROM_REF` and the push of a root commit, which has neither
+ref. The tools themselves are not installed in the
 tests, so the snippets' wording is checked only by reading. A push by URL,
 which has no remote-tracking refs to subtract, scans the whole history and
 refuses a leak that an earlier `--no-verify` push already put on origin.
