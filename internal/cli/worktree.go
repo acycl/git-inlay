@@ -144,23 +144,26 @@ func (s *session) attachOne(name string) error {
 		cleanup()
 		return err
 	}
+	// The inlay is attached and its files are in the tree, so the sync
+	// comes first: nothing below may leave them showing in the host. What
+	// follows is tidying, and a failure of it is not a failure to attach.
+	if err := s.refresh(); err != nil {
+		return err
+	}
 	g := in.Git()
 	if ok, _ := g.Succeeds("rev-parse", "--verify", "-q", "refs/remotes/origin/"+branch); ok {
 		if err := g.Run("branch", "-q", "--set-upstream-to=origin/"+branch, branch); err != nil {
-			return err
+			s.c.warnf("could not set the upstream of branch %s in inlay %s: %v", branch, name, err)
 		}
 	}
 	refs, err := g.Lines("for-each-ref", "--format=%(refname)", "refs/sibling/")
 	if err != nil {
-		return err
+		s.c.warnf("could not remove the refs that attach fetched into inlay %s under refs/sibling: %v", name, err)
 	}
 	for _, r := range refs {
 		if err := g.Run("update-ref", "-d", r); err != nil {
-			return err
+			s.c.warnf("could not remove %s from inlay %s: %v", r, name, err)
 		}
-	}
-	if err := s.refresh(); err != nil {
-		return err
 	}
 	s.c.printf("attached inlay %s from worktree %s (branch %s, %d claims)\n", name, e.Key, branch, len(m.Claims))
 	if !hasRemote {

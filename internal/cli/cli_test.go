@@ -841,6 +841,38 @@ func TestRestoreSyncsStagedClaims(t *testing.T) {
 	contains(t, f.read(".git/info/exclude"), "/docs/x.md\n", "host exclude after restore")
 }
 
+// A claim whose files cannot be staged is still a claim: the host ignores
+// its paths at once, and the error says how to stage them, since a rerun
+// would find the claim made and stage nothing.
+func TestClaimStagingFailure(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a file that cannot be read")
+	}
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	f.write("notes/a.md", "a\n")
+	locked := filepath.Join(f.root, "notes", "a.md")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	errOut := f.inlayFails(f.root, 3, "claim", "team", "notes")
+	contains(t, errOut, "the claims are recorded, but their files were not staged in inlay team", "claim of an unreadable file")
+	contains(t, errOut, "git inlay team add -- <path>...", "claim of an unreadable file")
+	if got := f.git(f.root, "status", "--porcelain"); got != "" {
+		t.Fatalf("host status after the failed claim = %q, want the claim ignored", got)
+	}
+	if got := f.inlayOK(f.root, "ls"); got != "team\tnotes/" {
+		t.Fatalf("ls after the failed claim = %q", got)
+	}
+	if err := os.Chmod(locked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.inlayOK(f.root, "team", "add", "--", "notes")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after staging by hand")
+}
+
 // unclaim gives up a claimed file that was edited before its first commit,
 // whose staged content then matches neither HEAD nor the tree, and leaves
 // the file as it is.

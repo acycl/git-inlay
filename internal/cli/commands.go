@@ -152,9 +152,19 @@ func (c *cli) claim(args []string) error {
 	if err := e.Inlay.WriteManifest(m); err != nil {
 		return err
 	}
+	// The claims are made once the manifest is written, so the host must
+	// ignore them from here on, whatever becomes of the staging.
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	// A rerun would find the claims in place and stage nothing, so a
+	// failure to stage says how to.
+	unstaged := func(err error) error {
+		return fmt.Errorf("the claims are recorded, but their files were not staged in inlay %s: %w\nonce that is resolved, stage them with: git inlay %s add -- <path>...", name, err, name)
+	}
 	files, err := s.stageable(e.Inlay, added)
 	if err != nil {
-		return err
+		return unstaged(err)
 	}
 	if len(files) > 0 {
 		// -f because a host .gitignore may cover the claim; stageable has
@@ -163,11 +173,8 @@ func (c *cli) claim(args []string) error {
 		// command line carries, a few hundred on Windows.
 		if _, err := e.Inlay.Git().OutputZWithInput(literalSpecs(files),
 			"add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
-			return err
+			return unstaged(err)
 		}
-	}
-	if err := s.refresh(); err != nil {
-		return err
 	}
 	s.warnUnexcluded()
 	for _, cl := range added {
@@ -641,6 +648,9 @@ func (s *session) vetTree(t gitx.Runner, name, rev, source string) (*manifest.Ma
 // place moves the staged repository to its final location, adopts it as
 // inlay name and runs the checkout command that populates the tree. Any
 // failure removes the inlay again, so a half-attached inlay never remains.
+// Git checks that nothing is in a checkout's way before it writes, which
+// vetTree has seen to; one that fails part way all the same, on a full
+// disk say, leaves the files it wrote, which the error names.
 func (s *session) place(tmp, name string, m *manifest.Manifest, checkout ...string) (*inlay.Inlay, error) {
 	final := inlay.Dir(s.host, s.host.Key, name)
 	if err := os.Rename(tmp, final); err != nil {
