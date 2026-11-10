@@ -457,7 +457,12 @@ func (c *cli) check(args []string) error {
 		var missing []manifest.Claim
 		if !hostStale {
 			if missing, err = s.unexcluded(); err != nil {
-				return err
+				// A claim beyond a symbolic link makes git refuse the
+				// whole question. That is a problem to report with the
+				// others, not a reason to drop them.
+				vs = append(vs, guard.Violation{Path: s.host.ExcludeFile(),
+					Reason: fmt.Sprintf("could not be checked against the claims, so the host may not ignore all of them: %v", err),
+					Fix:    "git inlay unclaim the claim that git names"})
 			}
 		}
 		for _, cl := range missing {

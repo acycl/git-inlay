@@ -1989,6 +1989,24 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 	}
 }
 
+// A claim that lies beyond a symbolic link makes git refuse to say what
+// the host ignores. check reports that as a problem among the others; it
+// does not stop on it.
+func TestCheckWithClaimBeyondSymlink(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	if err := os.Symlink(f.base, filepath.Join(f.root, "link")); err != nil {
+		t.Skipf("cannot create a symbolic link: %v", err)
+	}
+	f.inlayOK(f.root, "init", "team")
+	f.write(".git-inlay/team.paths", f.read(".git-inlay/team.paths")+"link/x\n")
+	f.inlayOK(f.root, "ls")
+	f.inlayOK(f.root, "hooks", "uninstall")
+	errOut := f.inlayFails(f.root, 1, "check")
+	contains(t, errOut, "could not be checked against the claims", "check with a claim beyond a link")
+	contains(t, errOut, "host pre-commit hook: is not installed", "check still reports its other findings")
+}
+
 // A symbolic link is claimed as the file git tracks it as, even when it
 // points at a directory: a directory claim's exclude pattern would never
 // match it, leaving the link in neither repository.
