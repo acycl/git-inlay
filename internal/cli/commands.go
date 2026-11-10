@@ -49,6 +49,9 @@ func (c *cli) init(args []string) error {
 			return err
 		}
 	}
+	if _, err := s.entry(name); err == nil {
+		return fmt.Errorf("inlay %q is already attached to this worktree", name)
+	}
 	// A manifest already in the tree, as detach --keep-files leaves, holds
 	// claims this inlay would not have; writing an empty one over it would
 	// lose them without a word.
@@ -904,6 +907,13 @@ func (c *cli) passthroughUnsynced(name string, args []string, cause error) error
 	if err != nil {
 		return err
 	}
+	// The part of the sync that needs no manifest: a moved checkout would
+	// otherwise push without the inlay's own guard.
+	if !in.Stamped() {
+		if err := in.Configure(); err != nil {
+			return err
+		}
+	}
 	run := in.GitAt(c.o.Dir)
 	expanded := resolveAliases(run, args)
 	if err := refuseTreeWide(in, args, expanded); err != nil {
@@ -1020,10 +1030,17 @@ func untrackedWide(args []string) (verb string, ok bool) {
 	}
 	switch args[i] {
 	case "clean":
+		// The last of -n, --dry-run and --no-dry-run decides, as in git.
 		opts, _ := gitArgs(args[i+1:], "e", "--exclude")
-		dry := slices.ContainsFunc(opts, func(o gitOption) bool {
-			return o.name == "n" || abbreviates(o.name, "--dry-run")
-		})
+		dry := false
+		for _, o := range opts {
+			switch {
+			case o.name == "n" || abbreviates(o.name, "--dry-run"):
+				dry = true
+			case len(o.name) > len("--no-") && strings.HasPrefix("--no-dry-run", o.name):
+				dry = false
+			}
+		}
 		return "remove", !dry
 	case "stash":
 		opts, pos := gitArgs(args[i+1:], "m", "--message")

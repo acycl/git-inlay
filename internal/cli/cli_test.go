@@ -870,6 +870,9 @@ func TestInitKeepsExistingManifest(t *testing.T) {
 	f.inlayOK(f.root, "claim", "team", "notes")
 	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
 	kept := f.read(".git-inlay/team.paths")
+	// An inlay that is attached is said to be, not told to move its
+	// manifest aside.
+	contains(t, f.inlayFails(f.root, 1, "init", "team"), `inlay "team" is already attached to this worktree`, "init of an attached inlay")
 	f.inlayOK(f.root, "detach", "team", "--force", "--keep-files")
 
 	contains(t, f.inlayFails(f.root, 1, "init", "team"), ".git-inlay/team.paths already exists", "init over a kept manifest")
@@ -992,6 +995,31 @@ func TestPassthroughRepairsBrokenManifest(t *testing.T) {
 		t.Fatalf("manifest after the repair = %q, want %q", got, good)
 	}
 	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after the repair")
+
+	// A merge that conflicts in the manifest leaves it unmerged, with
+	// markers; aborting the merge, through the inlay, puts it right. Both
+	// branches add a claim at the same place in the sorted file.
+	f.inlayOK(f.root, "team", "checkout", "-q", "-b", "other")
+	f.write("aa/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "team", "aa")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "aa")
+	f.inlayOK(f.root, "team", "checkout", "-q", "main")
+	f.write("ab/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "team", "ab")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "ab")
+	mine := f.read(".git-inlay/team.paths")
+	if out, errOut, code := f.inlay(f.root, "team", "merge", "-q", "other"); code == 0 {
+		t.Fatalf("the merge did not conflict:\n%s%s", out, errOut)
+	}
+	contains(t, f.read(".git-inlay/team.paths"), "<<<<<<<", "manifest after the conflicting merge")
+	contains(t, f.inlayFails(f.root, 1, "ls"), "holds merge conflict markers", "ls during the conflict")
+	if _, errOut, code := f.inlay(f.root, "team", "merge", "--abort"); code != 0 {
+		t.Fatalf("merge --abort: exit %d\n%s", code, errOut)
+	}
+	if got := f.read(".git-inlay/team.paths"); got != mine {
+		t.Fatalf("manifest after merge --abort = %q, want %q", got, mine)
+	}
+	contains(t, f.inlayOK(f.root, "check"), "ok:", "check after merge --abort")
 }
 
 // Scenario 5: an inlay remote that resolves to a host remote is refused.
@@ -2054,6 +2082,9 @@ func TestDetachLeavesHostTrackedFiles(t *testing.T) {
 // the host ignores. check reports that as a problem among the others; it
 // does not stop on it.
 func TestCheckWithClaimBeyondSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git for Windows does not check symbolic links out as links by default")
+	}
 	t.Parallel()
 	f := newFixture(t)
 	if err := os.Symlink(f.base, filepath.Join(f.root, "link")); err != nil {
@@ -2072,6 +2103,9 @@ func TestCheckWithClaimBeyondSymlink(t *testing.T) {
 // points at a directory: a directory claim's exclude pattern would never
 // match it, leaving the link in neither repository.
 func TestClaimSymlinkToDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git for Windows does not check symbolic links out as links by default")
+	}
 	t.Parallel()
 	f := newFixture(t)
 	shared := filepath.Join(f.base, "shared")
@@ -2424,7 +2458,8 @@ func TestExposedHostFiles(t *testing.T) {
 		t.Fatalf("inlay status = %q, want the exposed host file", got)
 	}
 	for _, args := range [][]string{
-		{"clean", "-fd"}, {"clean", "-f", "--", "notes"}, {"stash", "-u"}, {"stash", "push", "--include-untracked"},
+		{"clean", "-fd"}, {"clean", "-f", "--", "notes"}, {"clean", "-n", "--no-dry-run", "-fd"},
+		{"stash", "-u"}, {"stash", "push", "--include-untracked"},
 	} {
 		errOut := f.inlayFails(f.root, 1, append([]string{"team"}, args...)...)
 		contains(t, errOut, "1 host file(s) the inlay does not ignore (sample.cfg)", "refusal of "+strings.Join(args, " "))
@@ -2447,6 +2482,9 @@ func TestExposedHostFiles(t *testing.T) {
 	contains(t, f.inlayFails(f.root, 1, "detach", "team"), "uncommitted changes", "detach with an untracked inlay file")
 	f.inlayOK(f.root, "team", "add", "notes/b.md")
 	f.inlayOK(f.root, "team", "commit", "-q", "-m", "more notes")
+	// Not forced, so the test for uncommitted work runs: only the commits
+	// that are on no remote stand in the way now.
+	contains(t, f.inlayFails(f.root, 1, "detach", "team"), "has no remote", "detach with only the host file untracked")
 	f.inlayOK(f.root, "detach", "team", "--force")
 	if !f.exists("sample.cfg") {
 		t.Fatal("detach removed the host file")

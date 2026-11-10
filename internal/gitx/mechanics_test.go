@@ -643,6 +643,9 @@ func TestHostNegationExposesHostFilesToInlay(t *testing.T) {
 // link at x excluded while the host's "/x" hides it, and neither repository
 // would have it. Without the slash both patterns match.
 func TestDirectoryPatternSkipsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git for Windows does not treat symbolic links as links by default")
+	}
 	h := newHost(t)
 	target := filepath.Join(filepath.Dir(h.root), "shared")
 	writeFile(t, filepath.Join(target, "settings.json"), "{}\n")
