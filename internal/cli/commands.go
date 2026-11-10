@@ -47,6 +47,12 @@ func (c *cli) init(args []string) error {
 			return err
 		}
 	}
+	// A manifest already in the tree, as detach --keep-files leaves, holds
+	// claims this inlay would not have; writing an empty one over it would
+	// lose them without a word.
+	if _, err := os.Lstat(filepath.Join(s.host.Root, filepath.FromSlash(manifest.File(name)))); err == nil {
+		return fmt.Errorf("%s already exists, as a detach --keep-files leaves it; move it aside, and claim its paths again once the inlay is made", manifest.File(name))
+	}
 	in, err := inlay.Create(s.host, name)
 	if err != nil {
 		return err

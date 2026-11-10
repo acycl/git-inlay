@@ -776,6 +776,28 @@ func TestPassthroughSyncFailure(t *testing.T) {
 	contains(t, errOut, "empty path segment", "sync failure after git failed")
 }
 
+// init does not write an empty manifest over one already in the tree, such
+// as detach --keep-files leaves, nor delete it.
+func TestInitKeepsExistingManifest(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	f.write("notes/a.md", "a\n")
+	f.inlayOK(f.root, "claim", "team", "notes")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
+	kept := f.read(".git-inlay/team.paths")
+	f.inlayOK(f.root, "detach", "team", "--force", "--keep-files")
+
+	contains(t, f.inlayFails(f.root, 1, "init", "team"), ".git-inlay/team.paths already exists", "init over a kept manifest")
+	if got := f.read(".git-inlay/team.paths"); got != kept {
+		t.Fatalf("manifest after the refused init = %q, want %q", got, kept)
+	}
+	if err := os.Remove(filepath.Join(f.root, ".git-inlay", "team.paths")); err != nil {
+		t.Fatal(err)
+	}
+	f.inlayOK(f.root, "init", "team")
+}
+
 // restore brings back a manifest with a claim that was staged and not yet
 // committed, and the exclude files then follow it, so the host does not
 // see the restored files as untracked.
