@@ -43,6 +43,7 @@ func (c *cli) init(args []string) error {
 		return err
 	}
 	if *remoteURL != "" {
+		*remoteURL = s.givenURL(*remoteURL)
 		if err := s.checkRemote(*remoteURL); err != nil {
 			return err
 		}
@@ -488,11 +489,11 @@ func (c *cli) clone(args []string) error {
 	if len(args) < 1 || len(args) > 2 {
 		return usagef("usage: git inlay clone <url> [<name>] [--no-hooks]")
 	}
-	url := args[0]
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
+	url := s.givenURL(args[0])
 	s.noHooks = *noHooks
 	if err := s.refuseSparse(); err != nil {
 		return err

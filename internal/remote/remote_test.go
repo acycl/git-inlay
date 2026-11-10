@@ -1,6 +1,11 @@
 package remote
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeEquivalents(t *testing.T) {
 	same := []string{
@@ -81,5 +86,28 @@ func TestApplyLongestPrefix(t *testing.T) {
 	}
 	if got, ok := apply(rules, "https://example.com/x"); ok || got != "https://example.com/x" {
 		t.Fatalf("apply without a match = %q, %v", got, ok)
+	}
+}
+
+// A local repository reached through a symbolic link compares equal to its
+// real path, also when it is named without the ".git" of its directory, so
+// that the last component does not exist.
+func TestSameLocalPathThroughSymlink(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "real", "app.git")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(filepath.Join(base, "real"), link); err != nil {
+		t.Skipf("cannot create a symbolic link: %v", err)
+	}
+	for _, u := range []string{filepath.Join(link, "app.git"), filepath.Join(link, "app"), "file:///" + strings.TrimPrefix(filepath.ToSlash(filepath.Join(link, "app")), "/")} {
+		if !Same(repo, u) {
+			t.Errorf("Same(%q, %q) = false", repo, u)
+		}
+	}
+	if Same(repo, filepath.Join(link, "other")) {
+		t.Error("two repositories in one directory compare equal")
 	}
 }

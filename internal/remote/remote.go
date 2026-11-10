@@ -217,13 +217,24 @@ func scpSplit(s string) (host, path string, ok bool) {
 	return head, s[i+1:], true
 }
 
-// localPath canonicalizes a filesystem path when it exists.
+// localPath canonicalizes a filesystem path: absolute, with the symbolic
+// links resolved in as much of it as exists. The repository itself may be
+// spelled without the ".git" its directory carries, which git accepts, so
+// the last component need not exist for the rest to be resolved.
 func localPath(s string) string {
-	if r, err := filepath.EvalSymlinks(s); err == nil {
-		s = r
-	}
 	if a, err := filepath.Abs(s); err == nil {
 		s = a
 	}
-	return filepath.ToSlash(s)
+	rest := ""
+	for cur := s; ; {
+		if r, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.ToSlash(filepath.Join(r, rest))
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return filepath.ToSlash(s)
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
 }

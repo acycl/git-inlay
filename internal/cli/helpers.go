@@ -78,15 +78,28 @@ func (c *cli) homeDir() string {
 }
 
 // resolveURL makes a candidate remote URL comparable with the host's
-// configured remotes: a relative local path is resolved against the root,
-// as git does, and git applies its own insteadOf rewrites without touching
-// the network.
+// configured remotes. Git applies its insteadOf rewrites, without touching
+// the network, to the URL as given: made absolute first, an alias that is
+// not shaped like a URL ("work/app" for a rule on "work/") would pass for
+// a path and miss its rewrite. What is still a relative local path is
+// then resolved against the root, where every inlay command runs git.
 func (s *session) resolveURL(u string) string {
-	u = remote.Absolute(s.host.Root, u)
 	if out, err := s.host.Git().Output("ls-remote", "--get-url", u); err == nil && out != "" {
-		return out
+		u = out
 	}
-	return u
+	return remote.Absolute(s.host.Root, u)
+}
+
+// givenURL settles a remote URL from the command line before it is
+// stored: a relative local path means what it would to git clone, a path
+// from the current directory, and is made absolute, since the inlay's git
+// would read it from the root. A URL that an insteadOf rule rewrites is
+// left as written, for git to rewrite each time.
+func (s *session) givenURL(u string) string {
+	if out, err := s.host.Git().Output("ls-remote", "--get-url", u); err == nil && out != "" && out != u {
+		return u
+	}
+	return remote.Absolute(s.c.o.Dir, u)
 }
 
 // globalExcludes returns the user's global excludes file, if there is one.

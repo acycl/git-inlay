@@ -896,7 +896,45 @@ func TestRemoteGuard(t *testing.T) {
 		t.Fatal("push of an inlay to the host's remote succeeded")
 	}
 	contains(t, errOut, "refusing to push inlay x", "inlay pre-push")
-	contains(t, f.inlayFails(f.root, 1, "check"), "host's remote", "check")
+	errOut = f.inlayFails(f.root, 1, "check")
+	contains(t, errOut, "host's remote", "check")
+	contains(t, errOut, "1 problem(s)", "check counts one conflicting remote once")
+}
+
+// The remote guard sees the host's repository behind git's own aliasing: a
+// separate push URL, an insteadOf rule whose alias does not look like a
+// URL, and a relative path, which is read from the current directory as
+// git clone reads it.
+func TestRemoteGuardAliases(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	mirror := f.bare("mirror")
+	f.git(f.root, "remote", "set-url", "--push", "origin", mirror)
+	contains(t, f.inlayFails(f.root, 1, "init", "x", "--remote", mirror), "host's remote", "init --remote with the host's push URL")
+
+	f.git(f.root, "config", "--global", "url."+filepath.ToSlash(f.base)+"/.insteadOf", "work/")
+	contains(t, f.inlayFails(f.root, 1, "init", "x", "--remote", "work/host.git"), "host's remote", "init --remote with an insteadOf alias")
+	f.git(f.root, "config", "--global", "url."+filepath.ToSlash(f.base)+"/.pushInsteadOf", "push/")
+	private := f.bare("x-private")
+	f.inlayOK(f.root, "init", "x", "--remote", private)
+	f.inlayOK(f.root, "x", "remote", "set-url", "origin", "push/mirror.git")
+	contains(t, f.inlayFails(f.root, 1, "check"), "host's remote", "check with a pushInsteadOf alias")
+	f.inlayOK(f.root, "x", "remote", "set-url", "origin", private)
+	f.inlayOK(f.root, "x", "push", "-q", "-u", "origin", "main")
+
+	// From a subdirectory, a relative path names the same repository that
+	// git clone would reach from there.
+	other := filepath.Join(f.base, "other")
+	f.git(f.base, "clone", "-q", f.remote, other)
+	sub := filepath.Join(other, "pkg", "api")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, f.inlayFails(sub, 1, "clone", "../../../host.git"), "host's remote", "clone of the host's remote by a relative path")
+	contains(t, f.inlayOK(sub, "clone", "../../../x-private.git"), "attached inlay x from", "clone by a relative path")
+	if got := f.inlayOK(other, "x", "remote", "get-url", "origin"); !filepath.IsAbs(got) {
+		t.Fatalf("the inlay's remote is stored as %q, want an absolute path", got)
+	}
 }
 
 // Scenario 2: the host hooks block a forced add at commit and at push,

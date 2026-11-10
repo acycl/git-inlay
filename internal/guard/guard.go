@@ -438,7 +438,9 @@ func outgoingRange(run gitx.Runner, u RefUpdate, remoteName string, named bool) 
 func RemoteConflicts(hostRemotes []remote.Remote, inlayName string, inlayRemotes []remote.Remote) []Violation {
 	var out []Violation
 	for _, r := range inlayRemotes {
-		for _, u := range []string{r.URL, r.Push} {
+		// The push URL is the fetch URL unless configured apart; one
+		// conflict is one problem.
+		for _, u := range slices.Compact([]string{r.URL, r.Push}) {
 			if u == "" {
 				continue
 			}
