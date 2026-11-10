@@ -372,6 +372,19 @@ func TestPushOfCommitsThatPredateTheClaim(t *testing.T) {
 	contains(t, errOut, `made before the path was claimed, while the host still tracked it, they hold nothing of the inlay's: check with git log -p <remote>..HEAD -- ':(top,literal)CLAUDE.md'`, "pre-push fix")
 }
 
+// waitFor blocks until the file at path exists, which a command under test
+// creates once it has got as far as the test needs: a fixed sleep would
+// race the several git processes git-inlay starts first on a busy machine.
+func waitFor(t *testing.T, path string) {
+	t.Helper()
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+	}
+	t.Fatalf("%s did not appear: the command never got that far", path)
+}
+
 // An interrupt from the terminal reaches git-inlay as well as git. It must
 // outlive it, leaving the decision to git, and still answer with git's
 // exit status.
@@ -384,12 +397,13 @@ func TestPassthroughOutlivesInterrupt(t *testing.T) {
 	f.inlayOK(f.root, "init", "claude")
 	// A shell alias stands in for a git command that is still running; the
 	// interrupt goes to git-inlay alone.
-	cmd := exec.Command(filepath.Join(binDir, "git-inlay"), "claude", "-c", "alias.wait=!sleep 3; exit 7", "wait")
+	started := filepath.Join(f.base, "started")
+	cmd := exec.Command(filepath.Join(binDir, "git-inlay"), "claude", "-c", "alias.wait=!touch '"+started+"'; sleep 3; exit 7", "wait")
 	cmd.Dir, cmd.Env = f.root, f.env
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
+	waitFor(t, started)
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
@@ -2063,6 +2077,9 @@ func TestDetachLeavesStrays(t *testing.T) {
 // A claimed directory may hold more files than a command line carries, so
 // claim stages them through stdin and detach asks the host by claim.
 func TestClaimAndDetachLargeDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes 25,000 files")
+	}
 	t.Parallel()
 	f := newFixture(t)
 	f.inlayOK(f.root, "init", "claude")
@@ -2170,6 +2187,88 @@ func TestSparseCheckoutRefused(t *testing.T) {
 	}
 	f.git(f.root, "config", "core.sparseCheckout", "false")
 	f.inlayOK(f.root, "init", "team")
+}
+
+// The pre-commit guard reads the index git commits from. For commit -a and
+// commit <path> that is a temporary one, named in GIT_INDEX_FILE, and not
+// .git/index, which holds none of the change.
+func TestPreCommitReadsTemporaryIndex(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+	// A leak that got past the guard leaves the host tracking the file.
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	f.git(f.root, "commit", "-q", "--no-verify", "-m", "leak")
+
+	f.write(".claude/settings.json", "{\"changed\":true}\n")
+	f.write("README.md", "# host, edited\n")
+	const want = ".claude/settings.json: belongs to inlay claude"
+	contains(t, f.gitFails(f.root, "commit", "-q", "-a", "-m", "edit"), want, "commit -a")
+	contains(t, f.gitFails(f.root, "commit", "-q", "-m", "edit", "--", ".claude/settings.json"), want, "commit <path>")
+	if got := f.git(f.root, "diff", "--cached", "--name-only"); got != "" {
+		t.Fatalf("the refused commits left %q staged", got)
+	}
+	// The same forms commit a host file alone.
+	f.git(f.root, "commit", "-q", "-m", "readme", "--", "README.md")
+}
+
+// check --staged judges what is staged in the host and nothing else.
+func TestCheckStaged(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	f.write(".claude/settings.json", "{}\n")
+	f.inlayOK(f.root, "claim", "claude", ".claude")
+	f.inlayOK(f.root, "claude", "commit", "-q", "-m", "settings")
+
+	f.write("README.md", "# host, edited\n")
+	f.git(f.root, "add", "README.md")
+	f.inlayOK(f.root, "check", "--staged")
+	f.git(f.root, "add", "-f", ".claude/settings.json")
+	contains(t, f.inlayFails(f.root, 1, "check", "--staged"), ".claude/settings.json: belongs to inlay claude", "check --staged")
+	// Staged in the host, the file is also what the full check reports.
+	contains(t, f.inlayFails(f.root, 1, "check"), "tracked by the host but claimed by inlay claude", "check")
+}
+
+// --no-hooks keeps init, clone and attach from touching the host's hooks,
+// and ls takes an inlay's name.
+func TestNoHooksAndLsByName(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	private := f.bare("team-private")
+	f.inlayOK(f.root, "init", "team", "--remote", private, "--no-hooks")
+	f.inlayOK(f.root, "init", "me", "--no-hooks")
+	f.write("notes/a.md", "a\n")
+	f.write("scratch.md", "s\n")
+	f.inlayOK(f.root, "claim", "team", "notes")
+	f.inlayOK(f.root, "claim", "me", "scratch.md")
+	f.inlayOK(f.root, "team", "commit", "-q", "-m", "notes")
+	f.inlayOK(f.root, "team", "push", "-q", "-u", "origin", "main")
+
+	if got := f.inlayOK(f.root, "ls", "team"); got != "team\tnotes/" {
+		t.Fatalf("ls team = %q", got)
+	}
+	if got := f.inlayOK(f.root, "ls", "me", "--porcelain"); got != "me\tscratch.md" {
+		t.Fatalf("ls me --porcelain = %q", got)
+	}
+	contains(t, f.inlayFails(f.root, 1, "ls", "nope"), "no inlay named", "ls of an unknown inlay")
+
+	other := filepath.Join(f.base, "other")
+	f.git(f.base, "clone", "-q", f.remote, other)
+	f.inlayOK(other, "clone", private, "--no-hooks")
+	wt := filepath.Join(f.base, "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	f.inlayOK(wt, "attach", "--all", "--no-hooks")
+	for _, root := range []string{f.root, other} {
+		for _, hook := range []string{"pre-commit", "pre-push"} {
+			if _, err := os.Stat(filepath.Join(root, ".git", "hooks", hook)); err == nil {
+				t.Errorf("%s has a %s hook despite --no-hooks", root, hook)
+			}
+		}
+	}
 }
 
 // The guards read what git would commit and push, whatever the user's
