@@ -57,7 +57,9 @@ git inlay init <name> [--remote <url>] [--no-hooks]
 
 Creates an empty inlay for this worktree, on branch `main`, with an initial
 commit that holds its manifest. With `--remote`, the URL becomes the
-inlay's `origin`; a URL that is one of the host's remotes is refused.
+inlay's `origin`; a URL that is one of the host's remotes is refused. The
+inlay is set up (`push.autoSetupRemote`) so that its first
+`git inlay <name> push` needs no `-u origin main`.
 
 Unless `--no-hooks` is given, `init` installs the host's
 [guards](guards.md) wherever the hooks directory has room.

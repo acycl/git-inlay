@@ -379,6 +379,24 @@ func TestCommandLineMistakes(t *testing.T) {
 	contains(t, f.inlayFails(wt, 1, "team", "status"), "it is attached to worktree main, and git inlay attach team brings it here", "an inlay of another worktree")
 }
 
+// A new inlay is published by a plain push: init sets it up so that the
+// first one needs no -u origin main, with the remote given then or later.
+func TestFirstPushNeedsNoUpstream(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team", "--remote", f.bare("team-private"))
+	f.inlayOK(f.root, "team", "push", "-q")
+	if got := f.inlayOK(f.root, "status"); got != "team\tmain\tup to date\tclean" {
+		t.Fatalf("status after the first push = %q", got)
+	}
+	f.inlayOK(f.root, "init", "me")
+	f.inlayOK(f.root, "me", "remote", "add", "origin", f.bare("me-private"))
+	f.inlayOK(f.root, "me", "push", "-q")
+	if got := f.inlayOK(f.root, "status", "me"); got != "me\tmain\tup to date\tclean" {
+		t.Fatalf("status after the first push of an inlay given its remote later = %q", got)
+	}
+}
+
 // Host commits made while the host still tracked a path, pushed after the
 // path moved into an inlay, cannot be told from a leak, so the refusal
 // says how to check them and get them out.

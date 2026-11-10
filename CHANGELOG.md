@@ -11,6 +11,8 @@ change behaviour.
 - `-h` after a command prints that command's usage. A mistyped command,
   inlay name or option is answered with what was typed, what was probably
   meant, and the usage of the command.
+- `init` sets the inlay up so that its first `git inlay <name> push` needs
+  no `-u origin main`.
 
 ### Fixed
 

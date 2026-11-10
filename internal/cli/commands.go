@@ -70,6 +70,11 @@ func (c *cli) init(args []string) error {
 	if err == nil && *remoteURL != "" {
 		err = in.Git().Run("remote", "add", "origin", *remoteURL)
 	}
+	if err == nil {
+		// So that the first push needs no -u origin main: a new inlay has
+		// one branch and, sooner or later, one remote to publish it to.
+		err = in.Git().Run("config", "push.autoSetupRemote", "true")
+	}
 	if err != nil {
 		// Never leave a half-made inlay behind: it would look attached, and
 		// its manifest would sit in the tree with nothing to hide it.
