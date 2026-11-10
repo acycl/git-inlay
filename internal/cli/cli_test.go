@@ -776,6 +776,28 @@ func TestPassthroughSyncFailure(t *testing.T) {
 	contains(t, errOut, "empty path segment", "sync failure after git failed")
 }
 
+// unclaim gives up a claimed file that was edited before its first commit,
+// whose staged content then matches neither HEAD nor the tree, and leaves
+// the file as it is.
+func TestUnclaimAfterEdit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+	f.write("notes/a.md", "first\n")
+	f.inlayOK(f.root, "claim", "team", "notes")
+	f.write("notes/a.md", "edited\n")
+	contains(t, f.inlayOK(f.root, "unclaim", "team", "notes"), "unclaimed notes from inlay team", "unclaim output")
+	if got := f.read("notes/a.md"); got != "edited\n" {
+		t.Fatalf("notes/a.md after unclaim = %q", got)
+	}
+	if got := f.inlayOK(f.root, "team", "ls-files"); got != ".git-inlay/team.paths" {
+		t.Fatalf("inlay ls-files after unclaim = %q", got)
+	}
+	if got := f.git(f.root, "status", "--porcelain"); got != "?? notes/" {
+		t.Fatalf("host status after unclaim = %q", got)
+	}
+}
+
 // A manifest that does not parse stops every command but git run against
 // its inlay, which is how a merge that left conflict markers in it, or a
 // pull that brought a bad line, is put right.

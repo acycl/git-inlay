@@ -223,7 +223,10 @@ func (c *cli) unclaim(args []string) error {
 		}
 		removed = append(removed, ":(literal)"+rel)
 	}
-	rm := append([]string{"rm", "-r", "-q", "--cached", "--ignore-unmatch", "--"}, removed...)
+	// -f: git rm refuses, even with --cached, a file staged with content
+	// that differs from both HEAD and the tree, which a claimed file edited
+	// before its first commit is. Only index entries go; the files stay.
+	rm := append([]string{"rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--"}, removed...)
 	if err := e.Inlay.Git().Run(rm...); err != nil {
 		return err
 	}
