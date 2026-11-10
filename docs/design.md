@@ -494,7 +494,8 @@ tool, so the default is to have them.
 `hooks install`, for each of `pre-commit` and `pre-push`:
 
 - With `core.hooksPath` unset, in `git rev-parse --git-path hooks`: if the
-  file is absent, write the shim; if it contains our marker, rewrite it.
+  file is absent, write the shim; if it is a shim of ours, the markers
+  first and last with nothing of the user's around them, rewrite it.
   The shim is preferred because every git version runs it, including the
   older git a GUI client may bundle. Git skips a hook file that is not
   executable, so a shim without the bit counts as `inert`, not installed:
@@ -502,7 +503,7 @@ tool, so the default is to have them.
   again. The same holds for each inlay's own pre-push shim, which the
   sync step repairs. Windows has no such bit.
 - Where the shim cannot go, because `core.hooksPath` is set (a hook manager
-  owns the hooks) or a hook without our marker exists, and git is 2.54 or
+  owns the hooks) or a hook that is not our shim exists, and git is 2.54 or
   newer: write a config-defined hook into the host's repository config.
 
   ```ini
@@ -546,7 +547,7 @@ tool, so the default is to have them.
   pre-push hook by appending is unsafe because both scripts would read
   stdin.
 
-`hooks uninstall` removes the shims carrying our marker and the
+`hooks uninstall` removes the shims that are wholly ours and the
 `hook.git-inlay-*` sections.
 
 Shim:
@@ -573,7 +574,8 @@ so one install covers all of them.
 `hooks status` reports, per hook, one of: `installed` (our shim), `inert`
 (our shim without its executable bit), `configured` (our config-defined hook, on git 2.54 or newer), `disabled`
 (that hook with `enabled = false`), `managed` by `core.hooksPath`,
-`foreign` (present without our marker), or `absent`. `check` reports a hook
+`foreign` (present and not our shim, which includes one the user added
+lines to), or `absent`. `check` reports a hook
 that runs no guard while `hooks install` could place one, which on git 2.54
 or newer is every hook not `installed` or `configured`; below 2.54 a
 `managed` or `foreign` hook cannot be verified, so `check` warns instead,

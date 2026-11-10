@@ -17,7 +17,8 @@ import (
 	"github.com/acycl/git-inlay/internal/host"
 )
 
-// Markers delimit shim content so it can be recognized and removed.
+// Markers open and close a shim, which is how a hook file is recognized
+// as one git-inlay wrote.
 const (
 	Begin = "# >>> git-inlay >>>"
 	End   = "# <<< git-inlay <<<"
@@ -283,12 +284,21 @@ func state(path string) State {
 		return Absent
 	case err != nil:
 		return Foreign
-	case !strings.Contains(string(data), Begin):
+	case !shim(string(data)):
 		return Foreign
 	case !Runnable(path):
 		return Inert
 	}
 	return Installed
+}
+
+// shim reports whether a hook file is one Shim wrote and nothing more. A
+// file that holds the markers among lines of the user's own is theirs:
+// install would otherwise write over those lines and uninstall delete
+// them.
+func shim(data string) bool {
+	return strings.HasPrefix(data, "#!/bin/sh\n"+Begin+"\n") &&
+		strings.HasSuffix(strings.TrimRight(data, "\r\n"), End)
 }
 
 // Runnable reports whether git would run the hook file at path: on every

@@ -1152,6 +1152,28 @@ func TestForeignHookLeftAlone(t *testing.T) {
 	contains(t, f.read(".git/hooks/pre-commit"), "hook pre-commit", "pre-commit shim")
 }
 
+// A shim the user added lines to is theirs: install does not write over
+// it and uninstall does not delete it.
+func TestShimWithUserLinesIsForeign(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "claude")
+	edited := f.read(".git/hooks/pre-commit") + "npm test\n"
+	f.write(".git/hooks/pre-commit", edited)
+	contains(t, f.inlayOK(f.root, "hooks", "status"), "pre-commit  foreign", "status of an edited shim")
+	f.inlayOK(f.root, "hooks", "install")
+	if got := f.read(".git/hooks/pre-commit"); got != edited {
+		t.Fatalf("install rewrote an edited shim:\n%s", got)
+	}
+	f.inlayOK(f.root, "hooks", "uninstall")
+	if got := f.read(".git/hooks/pre-commit"); got != edited {
+		t.Fatalf("uninstall changed an edited shim:\n%s", got)
+	}
+	if f.exists(".git/hooks/pre-push") {
+		t.Fatal("uninstall left the untouched pre-push shim")
+	}
+}
+
 // Lefthook and the pre-commit framework write their hooks into the hooks
 // directory, where a line added by hand would not last, so below git 2.54
 // install prints the lines for the manager's own configuration.
