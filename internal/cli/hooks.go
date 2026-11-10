@@ -18,7 +18,6 @@ import (
 
 // hooks manages the host's hook shims.
 func (c *cli) hooks(args []string) error {
-	const usage = "usage: git inlay hooks install [--auto-attach] | uninstall | status"
 	fs := c.flagSet("hooks")
 	autoAttach := fs.Bool("auto-attach", false, "also attach the inlays to every new worktree")
 	args, err := parseArgs(fs, args)
@@ -26,7 +25,7 @@ func (c *cli) hooks(args []string) error {
 		return err
 	}
 	if len(args) != 1 || (*autoAttach && args[0] != "install") {
-		return usagef(usage)
+		return misuse("hooks")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -57,7 +56,7 @@ func (c *cli) hooks(args []string) error {
 			attach, err = hooks.AttachStatus(s.host)
 		}
 	default:
-		return usagef(usage)
+		return misuse("hooks")
 	}
 	if err != nil {
 		return err

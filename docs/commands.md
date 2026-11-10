@@ -22,8 +22,9 @@ git inlay version
 
 - Options may appear anywhere on the command line; `--` ends them. An
   unknown option is a usage error, never a path.
-- `-h` or `--help` after a command prints the usage summary and does
-  nothing else, as do `git inlay -h` and `git inlay help`. `git inlay --help` is answered by git, which shows the
+- `-h` or `--help` after a command prints that command's usage and does
+  nothing else. `git inlay -h` and `git inlay help` print the summary of
+  every command. `git inlay --help` is answered by git, which shows the
   manual page.
 - `claim`, `unclaim` and `which` read paths relative to the current
   directory. A path that starts with `:(top)` is relative to the root of

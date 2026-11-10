@@ -101,9 +101,11 @@ write. Move the listed files aside and run the command again.
 ### `no inlay named "<name>" is attached to this worktree`
 
 The first word after `git inlay` that is not a command is read as an
-inlay's name, so this is also what a mistyped command says. Otherwise the
-inlay is not in this worktree: `git inlay ls` shows the ones that are, and
-in a new worktree `git inlay attach --all` brings over the rest.
+inlay's name, so this is also what a mistyped command says; where the
+word is close to a command or to an inlay here, the message suggests it.
+Otherwise the inlay is not in this worktree: `git inlay ls` shows the ones
+that are, and in a new worktree `git inlay attach --all` brings over the
+rest.
 
 ### `<url> is the host's remote <name>`
 

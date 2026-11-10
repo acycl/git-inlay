@@ -6,6 +6,12 @@ change behaviour.
 
 ## Unreleased
 
+### Changed
+
+- `-h` after a command prints that command's usage. A mistyped command,
+  inlay name or option is answered with what was typed, what was probably
+  meant, and the usage of the command.
+
 ### Fixed
 
 - `git inlay <name> clean` and `stash -u` are refused while the inlay

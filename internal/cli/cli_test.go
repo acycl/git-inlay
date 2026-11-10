@@ -341,13 +341,42 @@ func TestArgumentsAndHelp(t *testing.T) {
 	f.inlayOK(f.root, "unclaim", "claude", "--", "-dash.md")
 	for _, args := range [][]string{
 		{"claim", "claude", "--help"}, {"unclaim", "claude", "-h"}, {"ls", "--help"},
-		{"clone", "--help"}, {"restore", "-h"}, {"hooks", "--help"}, {"help"},
+		{"clone", "--help"}, {"restore", "-h"}, {"hooks", "--help"},
 	} {
-		contains(t, f.inlayOK(f.root, args...), "usage: git inlay <command>", strings.Join(args, " "))
+		out := f.inlayOK(f.root, args...)
+		contains(t, out, "usage: git inlay "+args[0]+" ", strings.Join(args, " "))
+		contains(t, out, "Run git inlay -h for every command.", strings.Join(args, " "))
 	}
+	contains(t, f.inlayOK(f.root, "claim", "-h"), "usage: git inlay claim <name> [--] <path>...\n\n  give paths to an inlay\n", "claim -h")
+	contains(t, f.inlayOK(f.root, "help"), "usage: git inlay <command>", "help")
 	if got, want := f.inlayOK(f.root, "ls"), "claude\tfoo.md"; got != want {
 		t.Fatalf("ls after the help requests = %q, want %q", got, want)
 	}
+}
+
+// A mistake on the command line is answered in the terms the user typed:
+// the option as written with the usage of its command, a near miss of a
+// command or an inlay's name with what was probably meant, and an inlay
+// that is attached elsewhere with how to bring it here.
+func TestCommandLineMistakes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.inlayOK(f.root, "init", "team")
+
+	errOut := f.inlayFails(f.root, 2, "claim", "team", "--bogus", "x")
+	contains(t, errOut, "unknown option --bogus\nusage: git inlay claim <name> [--] <path>...", "an unknown option")
+	contains(t, f.inlayFails(f.root, 2, "init", "x", "--remote"), "option --remote needs a value", "an option without its value")
+	contains(t, f.inlayFails(f.root, 2, "status", "-x"), "unknown option -x", "an unknown short option")
+
+	contains(t, f.inlayFails(f.root, 2, "stauts"), `"stauts" is not a git-inlay command; did you mean "status"?`, "a mistyped command")
+	contains(t, f.inlayFails(f.root, 2, "claimm", "team", "x"), `did you mean "claim"?`, "a mistyped command with arguments")
+	contains(t, f.inlayFails(f.root, 2, "taem", "status"), `did you mean "team"?`, "a mistyped inlay")
+	contains(t, f.inlayFails(f.root, 1, "elsewhere", "status"), "git inlay ls lists the inlays here", "a name near nothing")
+	contains(t, f.inlayFails(f.root, 2, "team"), "usage: git inlay team <git command> [<args>...]", "an inlay without a git command")
+
+	wt := filepath.Join(f.base, "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	contains(t, f.inlayFails(wt, 1, "team", "status"), "it is attached to worktree main, and git inlay attach team brings it here", "an inlay of another worktree")
 }
 
 // Host commits made while the host still tracked a path, pushed after the

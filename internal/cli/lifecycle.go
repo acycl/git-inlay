@@ -28,7 +28,7 @@ func (c *cli) restore(args []string) error {
 		return err
 	}
 	if len(args) > 1 {
-		return usagef("usage: git inlay restore [<name>]")
+		return misuse("restore")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -86,7 +86,7 @@ func (c *cli) detach(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usagef("usage: git inlay detach <name> [--force] [--keep-files]")
+		return misuse("detach")
 	}
 	name := pos[0]
 	s, err := c.open()
@@ -291,7 +291,7 @@ func (c *cli) status(args []string) error {
 		return err
 	}
 	if len(pos) > 1 {
-		return usagef("usage: git inlay status [<name>] [--fetch] [--porcelain]")
+		return misuse("status")
 	}
 	s, err := c.open()
 	if err != nil {

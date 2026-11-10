@@ -100,6 +100,56 @@ Inlay state lives under .git/inlays. Nothing is ever added to the host's
 commits: the host ignores every claimed path through .git/info/exclude.
 `
 
+// synopses holds each verb's arguments, as its usage error prints them and
+// as -h after the verb does; docs/commands.md and the manual page carry
+// the same lines.
+var synopses = map[string]string{
+	"init":    "<name> [--remote <url>] [--no-hooks]",
+	"clone":   "<url> [<name>] [--no-hooks]",
+	"attach":  "(<name>... | --all) [--no-hooks]",
+	"detach":  "<name> [--force] [--keep-files]",
+	"claim":   "<name> [--] <path>...",
+	"unclaim": "<name> [--] <path>...",
+	"ls":      "[<name>] [--porcelain]",
+	"which":   "<path>...",
+	"status":  "[<name>] [--fetch] [--porcelain]",
+	"check":   "[--staged] [--fix]",
+	"restore": "[<name>]",
+	"prune":   "[--dry-run] [--force]",
+	"hooks":   "(install [--auto-attach] | uninstall | status)",
+	"version": "",
+}
+
+// usageOf renders the usage line of a verb.
+func usageOf(verb string) string {
+	return strings.TrimSpace("usage: git inlay " + verb + " " + synopses[verb])
+}
+
+// misuse is the usage error of a verb given the wrong arguments.
+func misuse(verb string) error { return usageError{usageOf(verb)} }
+
+// verbHelp is what -h after a verb prints: its usage line and what the
+// summary of every command says about it.
+func verbHelp(verb string) string {
+	var about []string
+	found := false
+	for line := range strings.Lines(usage) {
+		text := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "  "+verb+" ") || strings.HasPrefix(line, "  "+verb+","):
+			found = true
+			if _, rest, ok := strings.Cut(strings.TrimPrefix(line, "  "), "  "); ok {
+				about = append(about, strings.TrimSpace(rest))
+			}
+		case found && strings.HasPrefix(line, "      ") && !strings.HasPrefix(text, "("):
+			about = append(about, text)
+		default:
+			found = false
+		}
+	}
+	return usageOf(verb) + "\n\n  " + strings.Join(about, "\n  ") + "\n\nRun git inlay -h for every command.\n"
+}
+
 // usageError is a command-line mistake; it exits 2.
 type usageError struct{ msg string }
 
@@ -164,7 +214,11 @@ func (c *cli) dispatch(args []string) error {
 	// Before the verb reads its arguments, so that no verb takes --help
 	// for a path or an inlay; the hook family passes its arguments on.
 	if implemented[verb] && verb != "hook" && wantsHelp(rest) {
-		fmt.Fprint(c.o.Stdout, usage)
+		if _, ok := synopses[verb]; ok {
+			fmt.Fprint(c.o.Stdout, verbHelp(verb))
+		} else {
+			fmt.Fprint(c.o.Stdout, usage)
+		}
 		return nil
 	}
 	switch verb {
@@ -235,7 +289,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
-			return nil, usageError{err.Error()}
+			return nil, usageError{optionError(fs, err, args)}
 		}
 		rest := fs.Args()
 		if len(rest) == 0 {
@@ -247,6 +301,30 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 		pos = append(pos, rest[0])
 		args = rest[1:]
 	}
+}
+
+// optionError words a flag package error as git words its own, naming
+// the option as it was typed and the usage of the verb it was given to.
+func optionError(fs *flag.FlagSet, err error, args []string) string {
+	msg := err.Error()
+	typed := func(name string) string {
+		for _, a := range args {
+			rest := strings.TrimLeft(a, "-")
+			if bare, _, _ := strings.Cut(rest, "="); rest != a && bare == name {
+				return a[:len(a)-len(rest)] + bare
+			}
+		}
+		return "--" + name
+	}
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
+		msg = "unknown option " + typed(name)
+	} else if name, ok := strings.CutPrefix(msg, "flag needs an argument: -"); ok {
+		msg = "option " + typed(name) + " needs a value"
+	}
+	if _, ok := synopses[fs.Name()]; ok {
+		msg += "\n" + usageOf(fs.Name())
+	}
+	return msg
 }
 
 func (c *cli) printf(format string, a ...any) { fmt.Fprintf(c.o.Stdout, format, a...) }

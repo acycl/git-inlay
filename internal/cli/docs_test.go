@@ -92,6 +92,28 @@ func TestCommandReferenceCoversUsage(t *testing.T) {
 	}
 }
 
+// TestSynopsesMatchTheDocuments checks that the usage line each verb
+// prints is the synopsis line the command reference and the manual page
+// give it.
+func TestSynopsesMatchTheDocuments(t *testing.T) {
+	reference := readDoc(t, "docs/commands.md")
+	page := readDoc(t, "man/git-inlay.1")
+	page = strings.NewReplacer(`\-`, "-", `\fB`, "", `\fR`, "", `\fI`, "").Replace(page)
+	for _, verb := range documentedVerbs() {
+		if _, ok := synopses[verb]; !ok {
+			t.Errorf("no synopsis for %q", verb)
+			continue
+		}
+		line := strings.TrimPrefix(usageOf(verb), "usage: ")
+		if !strings.Contains(reference, "\n"+line+"\n") {
+			t.Errorf("docs/commands.md has no line %q", line)
+		}
+		if !strings.Contains(page, "\n"+line+"\n") {
+			t.Errorf("man/git-inlay.1 has no synopsis line %q", line)
+		}
+	}
+}
+
 // TestReadmeListsEveryVerb checks that the README's command table has a
 // row for every verb. The table is a summary, so options are not held to
 // it, and version is left to the command reference.

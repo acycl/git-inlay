@@ -29,7 +29,7 @@ func (c *cli) attach(args []string) error {
 		return err
 	}
 	if (len(names) == 0 && !*all) || (len(names) > 0 && *all) {
-		return usagef("usage: git inlay attach <name>... | --all [--no-hooks]")
+		return misuse("attach")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -211,7 +211,7 @@ func (c *cli) prune(args []string) error {
 		return err
 	}
 	if len(pos) > 0 {
-		return usagef("usage: git inlay prune [--dry-run] [--force]")
+		return misuse("prune")
 	}
 	s, err := c.open()
 	if err != nil {

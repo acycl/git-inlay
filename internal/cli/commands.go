@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,7 +27,7 @@ func (c *cli) init(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return usagef("usage: git inlay init <name> [--remote <url>] [--no-hooks]")
+		return misuse("init")
 	}
 	name := pos[0]
 	if err := reservedName(name, true); err != nil {
@@ -95,7 +96,7 @@ func (c *cli) claim(args []string) error {
 		return err
 	}
 	if len(pos) < 2 {
-		return usagef("usage: git inlay claim <name> [--] <path>...")
+		return misuse("claim")
 	}
 	name, paths := pos[0], pos[1:]
 	s, err := c.open()
@@ -198,7 +199,7 @@ func (c *cli) unclaim(args []string) error {
 		return err
 	}
 	if len(pos) < 2 {
-		return usagef("usage: git inlay unclaim <name> [--] <path>...")
+		return misuse("unclaim")
 	}
 	name, paths := pos[0], pos[1:]
 	s, err := c.open()
@@ -270,7 +271,7 @@ func (c *cli) ls(args []string) error {
 		return err
 	}
 	if len(pos) > 1 {
-		return usagef("usage: git inlay ls [<name>] [--porcelain]")
+		return misuse("ls")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -314,7 +315,7 @@ func (c *cli) which(args []string) error {
 		return err
 	}
 	if len(pos) == 0 {
-		return usagef("usage: git inlay which <path>...")
+		return misuse("which")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -366,7 +367,7 @@ func (c *cli) check(args []string) error {
 		return err
 	}
 	if len(pos) > 0 {
-		return usagef("usage: git inlay check [--staged] [--fix]")
+		return misuse("check")
 	}
 	// Read only: check reports what is on disk rather than repairing it
 	// first, and works on a read-only .git. With --fix it runs the sync
@@ -499,7 +500,7 @@ func (c *cli) clone(args []string) error {
 		return err
 	}
 	if len(args) < 1 || len(args) > 2 {
-		return usagef("usage: git inlay clone <url> [<name>] [--no-hooks]")
+		return misuse("clone")
 	}
 	s, err := c.open()
 	if err != nil {
@@ -748,12 +749,9 @@ func manifestName(t gitx.Runner, url, rev string) (string, error) {
 // the next command. Claims that changed are vetted as check would, and
 // paths the inlay has come to track outside its claims are reported.
 func (c *cli) passthrough(name string, args []string) error {
-	if len(args) == 0 {
-		return usagef("usage: git inlay %s <git command> [args]", name)
-	}
 	s, err := c.open()
 	var broken *inlay.ManifestError
-	if errors.As(err, &broken) && broken.Name == name {
+	if errors.As(err, &broken) && broken.Name == name && len(args) > 0 {
 		return c.passthroughUnsynced(name, args, broken)
 	}
 	if err != nil {
@@ -761,7 +759,10 @@ func (c *cli) passthrough(name string, args []string) error {
 	}
 	e, err := s.entry(name)
 	if err != nil {
-		return err
+		return s.unknown(name)
+	}
+	if len(args) == 0 {
+		return usagef("usage: git inlay %s <git command> [<args>...]", name)
 	}
 	run := e.Inlay.GitAt(c.o.Dir)
 	expanded := resolveAliases(run, args)
@@ -815,6 +816,56 @@ func (c *cli) passthrough(name string, args []string) error {
 		return fmt.Errorf("git succeeded, but the exclude files were not brought up to date: %w", syncErr)
 	}
 	return nil
+}
+
+// unknown is the error for a first word that is neither a command nor an
+// inlay attached here. Any word that could name an inlay is taken for one,
+// so a mistyped command lands here too; when the word is close to a
+// command or to an inlay's name, the error says so and counts as a usage
+// error.
+func (s *session) unknown(name string) error {
+	if e, ok := s.sibling(name); ok {
+		return fmt.Errorf("no inlay named %q is attached to this worktree; it is attached to worktree %s, and git inlay attach %s brings it here", name, e.Key, name)
+	}
+	msg := fmt.Sprintf("no inlay named %q is attached to this worktree, and %q is not a git-inlay command", name, name)
+	candidates := slices.Sorted(maps.Keys(synopses))
+	candidates = append(candidates, s.attachedNames()...)
+	best, bestDist := "", 3
+	for _, c := range candidates {
+		if d := editDistance(name, c); d < bestDist {
+			best, bestDist = c, d
+		}
+	}
+	if best == "" {
+		return errors.New(msg + "; git inlay ls lists the inlays here, and git inlay -h the commands")
+	}
+	return usageError{msg + fmt.Sprintf("; did you mean %q?", best)}
+}
+
+// editDistance counts the single-character insertions, deletions,
+// substitutions and swaps of neighbours that turn a into b.
+func editDistance(a, b string) int {
+	prev2 := make([]int, len(b)+1)
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				cur[j] = min(cur[j], prev2[j-2]+1)
+			}
+		}
+		prev2, prev, cur = prev, cur, prev2
+	}
+	return prev[len(b)]
 }
 
 // passthroughUnsynced is passthrough for an inlay whose manifest does not
