@@ -110,47 +110,71 @@ func Absolute(base, u string) string {
 	return filepath.Join(base, u)
 }
 
-// Same reports whether two URLs name the same repository.
-func Same(a, b string) bool { return Normalize(a) == Normalize(b) }
+// Same reports whether two URLs name the same repository. A port tells
+// two repositories apart only between URLs of one transport: a server
+// reached over https and over ssh on a port of its own is still one server,
+// and taking the two for different repositories would let an inlay push to
+// its host's remote.
+func Same(a, b string) bool {
+	la, lb := locate(a), locate(b)
+	if la.key != lb.key {
+		return false
+	}
+	return la.transport != lb.transport || la.port == lb.port
+}
 
 // Normalize reduces a git URL to a comparable "host/path" form: scp-like,
 // ssh and https spellings of one repository compare equal, as do variants
-// with or without a user, a trailing slash or a .git suffix. Case is folded
-// because the common hosting services ignore it.
-func Normalize(raw string) string {
+// with or without a user, a port, a trailing slash or a .git suffix. Case
+// is folded because the common hosting services ignore it.
+func Normalize(raw string) string { return locate(raw).key }
+
+// location is a git URL taken apart for comparison.
+type location struct {
+	key       string // "host/path", or the path alone for a local repository
+	transport string // "ssh", "https", "http" or "git"; empty for a local path
+	port      string // the transport's default when the URL names none
+}
+
+// locate parses a git URL.
+func locate(raw string) location {
 	s := strings.TrimSpace(raw)
+	var loc location
 	host, p := "", s
-	switch {
-	case strings.Contains(s, "://"):
-		u, err := url.Parse(s)
-		if err == nil {
-			host = strings.ToLower(u.Hostname())
-			if port := u.Port(); port != "" && !defaultPort(u.Scheme, port) {
-				host += ":" + port
-			}
-			p = u.Path
-			if u.Scheme == "file" {
-				host, p = "", localPath(driveSlash(u.Path))
-			}
-		}
-	case scpLike(s):
-		h, rest, _ := strings.Cut(s, ":")
-		if i := strings.LastIndex(h, "@"); i >= 0 {
-			h = h[i+1:]
-		}
+	if h, rest, ok := scpSplit(s); ok {
 		host, p = strings.ToLower(h), rest
-	default:
+		loc.transport, loc.port = "ssh", defaultPorts["ssh"]
+	} else if strings.Contains(s, "://") {
+		if u, err := url.Parse(s); err == nil {
+			host, p = strings.ToLower(u.Hostname()), u.Path
+			switch scheme := strings.ToLower(u.Scheme); scheme {
+			case "file":
+				host, p = "", localPath(driveSlash(u.Path))
+			case "git+ssh", "ssh+git":
+				loc.transport = "ssh"
+			default:
+				loc.transport = scheme
+			}
+			if loc.port = u.Port(); loc.port == "" {
+				loc.port = defaultPorts[loc.transport]
+			}
+		}
+	} else {
 		p = localPath(s)
 	}
 	p = strings.Trim(p, "/")
 	p = strings.TrimSuffix(p, ".git")
 	p = strings.TrimSuffix(p, "/")
 	p = strings.ToLower(p)
-	if host == "" {
-		return p
+	loc.key = p
+	if host != "" {
+		loc.key = host + "/" + p
 	}
-	return host + "/" + p
+	return loc
 }
+
+// defaultPorts maps a transport to the port a URL without one means.
+var defaultPorts = map[string]string{"ssh": "22", "https": "443", "http": "80", "git": "9418"}
 
 // driveSlash drops the slash a file URL puts before a Windows drive letter.
 func driveSlash(p string) string {
@@ -162,18 +186,35 @@ func driveSlash(p string) string {
 
 // scpLike reports whether s has the form [user@]host:path.
 func scpLike(s string) bool {
+	_, _, ok := scpSplit(s)
+	return ok
+}
+
+// scpSplit splits the scp-like form [user@]host:path into its host and
+// path. The host may be an IPv6 address in brackets, which come off.
+func scpSplit(s string) (host, path string, ok bool) {
+	if strings.Contains(s, "://") {
+		return "", "", false
+	}
 	i := strings.Index(s, ":")
+	if j := strings.Index(s, "]:"); j >= 0 && strings.Contains(s[:j], "[") {
+		i = j + 1
+	}
 	if i <= 0 {
-		return false
+		return "", "", false
 	}
 	head := s[:i]
 	if strings.Contains(head, "/") {
-		return false
+		return "", "", false
 	}
 	if len(head) == 1 && unicode.IsLetter(rune(head[0])) {
-		return false // a Windows drive letter
+		return "", "", false // a Windows drive letter
 	}
-	return true
+	if at := strings.LastIndex(head, "@"); at >= 0 {
+		head = head[at+1:]
+	}
+	head = strings.TrimSuffix(strings.TrimPrefix(head, "["), "]")
+	return head, s[i+1:], true
 }
 
 // localPath canonicalizes a filesystem path when it exists.
@@ -185,19 +226,4 @@ func localPath(s string) string {
 		s = a
 	}
 	return filepath.ToSlash(s)
-}
-
-// defaultPort reports whether port is the scheme's default and can be dropped.
-func defaultPort(scheme, port string) bool {
-	switch scheme {
-	case "ssh":
-		return port == "22"
-	case "https":
-		return port == "443"
-	case "http":
-		return port == "80"
-	case "git":
-		return port == "9418"
-	}
-	return false
 }

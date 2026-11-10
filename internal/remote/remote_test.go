@@ -7,6 +7,7 @@ func TestNormalizeEquivalents(t *testing.T) {
 		"git@github.com:acme/app.git",
 		"ssh://git@github.com/acme/app",
 		"ssh://git@github.com:22/acme/app.git",
+		"git+ssh://git@github.com:22/acme/app.git",
 		"https://github.com/ACME/App/",
 		"https://github.com/acme/app.git",
 		"https://user@github.com/acme/app",
@@ -28,6 +29,29 @@ func TestNormalizeEquivalents(t *testing.T) {
 	}
 }
 
+// A port tells repositories apart only within one transport: the same
+// server answers https on 443 and ssh on a port of its own.
+func TestSamePorts(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"https://git.corp.example/acme/app.git", "ssh://git@git.corp.example:2222/acme/app.git", true},
+		{"https://git.corp.example:8443/acme/app", "git@git.corp.example:acme/app", true},
+		{"http://git.corp.example/acme/app", "https://git.corp.example/acme/app", true},
+		{"ssh://git@git.corp.example/acme/app", "ssh://git@git.corp.example:2222/acme/app", false},
+		{"git@git.corp.example:acme/app", "ssh://git.corp.example:22/acme/app", true},
+		{"https://git.corp.example/acme/app", "https://git.corp.example:8443/acme/app", false},
+		{"git@[::1]:acme/app", "ssh://git@[::1]/acme/app.git", true},
+		{"https://git.corp.example/acme/app", "ssh://git@git.corp.example:2222/acme/other", false},
+	}
+	for _, c := range cases {
+		if got := Same(c.a, c.b); got != c.want {
+			t.Errorf("Same(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestScpLike(t *testing.T) {
 	cases := map[string]bool{
 		"git@github.com:acme/app": true,
@@ -36,6 +60,8 @@ func TestScpLike(t *testing.T) {
 		"host/dir:x":              false,
 		"/srv/git/app.git":        false,
 		"app.git":                 false,
+		"git@[::1]:acme/app":      true,
+		"ssh://host:22/acme/app":  false,
 	}
 	for in, want := range cases {
 		if got := scpLike(in); got != want {

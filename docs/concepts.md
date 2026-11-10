@@ -130,6 +130,11 @@ enforce them as you work:
 Remote comparison looks through spelling: `git@host:a/b`,
 `ssh://git@host/a/b` and `https://host/a/b` are the same repository, with
 or without a trailing `.git`, and git's `insteadOf` rewrites are applied.
+A port sets two URLs apart only when both use the same transport, so
+`https://host/a/b` and `ssh://git@host:2222/a/b` are still one repository.
+What the comparison cannot see through is a name that only your machine
+resolves: a `Host` alias in `~/.ssh/config`, or a second hostname for the
+same server.
 
 ## What git-inlay does not do
 

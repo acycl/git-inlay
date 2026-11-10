@@ -338,8 +338,11 @@ variables set by the pre-commit framework.
 
 Remote comparison normalizes URLs before comparing: scp-like `git@host:a/b`,
 `ssh://git@host/a/b`, and `https://host/a/b` compare equal; a trailing `.git`
-and trailing slashes are ignored; `insteadOf` rewrites are applied by asking
-git with `git ls-remote --get-url <remote>`.
+and trailing slashes are ignored; a port counts only between URLs of one
+transport, since a server's https and ssh ports differ by nature. The
+`insteadOf` rewrites of configured remotes are applied from the
+configuration, and those of a URL given on the command line by asking git
+with `git ls-remote --get-url <url>`.
 
 Every guard failure lists the offending paths, names the owning inlay, and
 prints the exact command that resolves it.
