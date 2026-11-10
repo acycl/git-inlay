@@ -157,3 +157,33 @@ func TestEscape(t *testing.T) {
 		}
 	}
 }
+
+// A file that holds more than one managed block, as a hand edit or a copy
+// from another clone leaves it, is brought back to one: the entries of the
+// others would keep paths hidden from the host after their claims are gone,
+// with check none the wiser.
+func TestDuplicateBlocksCollapse(t *testing.T) {
+	stale := HostBlock([]manifest.Claim{{Path: "old"}})
+	block := HostBlock([]manifest.Claim{{Path: "x"}})
+	doubled := "*.log\n" + block + "between\n" + stale + "after\n"
+	want := "*.log\n" + block + "between\nafter\n"
+	if got := Splice([]byte(doubled), block); string(got) != want {
+		t.Fatalf("Splice = %q, want %q", got, want)
+	}
+	if got := Strip([]byte(doubled)); string(got) != "*.log\nbetween\nafter\n" {
+		t.Fatalf("Strip = %q", got)
+	}
+	path := filepath.Join(t.TempDir(), "exclude")
+	if err := os.WriteFile(path, []byte(doubled), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := HostCurrent(path, []manifest.Claim{{Path: "x"}}); err != nil || ok {
+		t.Fatalf("HostCurrent with a second block = %v, %v, want stale", ok, err)
+	}
+	if err := RemoveHost(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "*.log\nbetween\nafter\n" {
+		t.Fatalf("after RemoveHost: %q", got)
+	}
+}

@@ -104,11 +104,14 @@ func lineIndex(s, marker string, from int) int {
 }
 
 // Splice returns content with the managed block replaced, or appended when
-// absent. Everything outside the markers is preserved byte for byte.
+// absent. Everything outside the markers is preserved byte for byte. A
+// file that has come to hold several blocks, by a hand edit or a copy
+// from another clone, keeps the first one's place and loses the others,
+// whose entries would otherwise hide paths from the host for good.
 func Splice(content []byte, block string) []byte {
 	s := string(content)
 	if begin, end, ok := bounds(s); ok {
-		return []byte(s[:begin] + block + s[end:])
+		return []byte(s[:begin] + block + string(Strip([]byte(s[end:]))))
 	}
 	if s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
@@ -116,14 +119,16 @@ func Splice(content []byte, block string) []byte {
 	return []byte(s + block)
 }
 
-// Strip returns content without the managed block.
+// Strip returns content without any managed block.
 func Strip(content []byte) []byte {
 	s := string(content)
-	begin, end, ok := bounds(s)
-	if !ok {
-		return content
+	for {
+		begin, end, ok := bounds(s)
+		if !ok {
+			return []byte(s)
+		}
+		s = s[:begin] + s[end:]
 	}
-	return []byte(s[:begin] + s[end:])
 }
 
 // WriteHost rewrites the host exclude file at path so its managed block
