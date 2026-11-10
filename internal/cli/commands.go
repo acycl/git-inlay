@@ -76,7 +76,7 @@ func (c *cli) init(args []string) error {
 	if err == nil {
 		// So that the first push needs no -u origin main: a new inlay has
 		// one branch and, sooner or later, one remote to publish it to.
-		err = in.Git().Run("config", "push.autoSetupRemote", "true")
+		err = in.Git().Run("config", autoSetupRemote, "true")
 	}
 	if err != nil {
 		// Never leave a half-made inlay behind: it would look attached, and
@@ -96,6 +96,11 @@ func (c *cli) init(args []string) error {
 	s.guardHost()
 	return nil
 }
+
+// autoSetupRemote is the setting that lets a plain push publish a branch
+// with no upstream. init sets it, and attach copies it for a sibling that
+// was never pushed, whose branch has no upstream to copy.
+const autoSetupRemote = "push.autoSetupRemote"
 
 // claim gives paths to an inlay.
 func (c *cli) claim(args []string) error {
@@ -846,10 +851,18 @@ func (s *session) unknown(name string) error {
 	if e, ok := s.sibling(name); ok {
 		return fmt.Errorf("no inlay named %q is attached to this worktree; it is attached to worktree %s, and git inlay attach %s brings it here", name, e.Key, name)
 	}
+	if held[name] {
+		return fmt.Errorf("no inlay named %q is attached to this worktree, and git-inlay has no %s command, though the name is held back for one", name, name)
+	}
 	msg := fmt.Sprintf("no inlay named %q is attached to this worktree, and %q is not a git-inlay command", name, name)
 	candidates := slices.Sorted(maps.Keys(synopses))
 	candidates = append(candidates, s.attachedNames()...)
-	best, bestDist := "", 3
+	// One slip in a short word, two in a longer one: any two-letter word
+	// is within two edits of "ls".
+	best, bestDist := "", 2
+	if len(name) > 4 {
+		bestDist = 3
+	}
 	for _, c := range candidates {
 		if d := editDistance(name, c); d < bestDist {
 			best, bestDist = c, d

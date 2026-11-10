@@ -83,8 +83,11 @@ func (s *session) attachOne(name string) error {
 		return fmt.Errorf("no inlay named %q is attached to another worktree of this host", name)
 	}
 	sib := inlay.Elsewhere(s.host, e.GitDir)
-	branch, err := sib.Output("symbolic-ref", "-q", "--short", "HEAD")
-	if err != nil || branch == "" {
+	// The full name, cut down by hand: the short form git prints turns
+	// into "heads/main" beside a tag of the same name.
+	head, err := sib.Output("symbolic-ref", "-q", "HEAD")
+	branch, onBranch := strings.CutPrefix(head, "refs/heads/")
+	if err != nil || !onBranch || branch == "" {
 		return fmt.Errorf("inlay %s in worktree %s is not on a branch; check one out there first", name, e.Key)
 	}
 	// Only commits travel. The sibling's worktree may itself be gone, in
@@ -161,6 +164,9 @@ func (s *session) attachOne(name string) error {
 		if err := g.Run("branch", "-q", "--set-upstream-to=origin/"+branch, branch); err != nil {
 			s.c.warnf("could not set the upstream of branch %s in inlay %s: %v", branch, name, err)
 		}
+	} else if err := g.Run("config", autoSetupRemote, "true"); err != nil {
+		// The sibling was never pushed, so there is no upstream to copy.
+		s.c.warnf("could not set %s in inlay %s: %v", autoSetupRemote, name, err)
 	}
 	if err := g.Run("update-ref", "-d", sibRef); err != nil {
 		s.c.warnf("could not remove %s from inlay %s: %v", sibRef, name, err)

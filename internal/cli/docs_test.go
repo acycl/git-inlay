@@ -92,6 +92,18 @@ func TestCommandReferenceCoversUsage(t *testing.T) {
 	}
 }
 
+// TestVerbHelpDescribesEveryVerb checks that -h after a verb has something
+// to say about it beyond the usage line, which it takes from the summary
+// of every command.
+func TestVerbHelpDescribesEveryVerb(t *testing.T) {
+	for verb := range synopses {
+		_, about, _ := strings.Cut(verbHelp(verb), "\n\n")
+		if first, _, _ := strings.Cut(about, "\n"); strings.TrimSpace(first) == "" {
+			t.Errorf("git inlay %s -h describes nothing:\n%s", verb, verbHelp(verb))
+		}
+	}
+}
+
 // TestSynopsesMatchTheDocuments checks that the usage line each verb
 // prints is the synopsis line the command reference and the manual page
 // give it.

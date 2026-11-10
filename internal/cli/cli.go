@@ -129,6 +129,10 @@ func usageOf(verb string) string {
 // misuse is the usage error of a verb given the wrong arguments.
 func misuse(verb string) error { return usageError{usageOf(verb)} }
 
+// usageColumn is where the description of a command starts on its line of
+// the usage text.
+const usageColumn = 42
+
 // verbHelp is what -h after a verb prints: its usage line and what the
 // summary of every command says about it.
 func verbHelp(verb string) string {
@@ -139,8 +143,9 @@ func verbHelp(verb string) string {
 		switch {
 		case strings.HasPrefix(line, "  "+verb+" ") || strings.HasPrefix(line, "  "+verb+","):
 			found = true
-			if _, rest, ok := strings.Cut(strings.TrimPrefix(line, "  "), "  "); ok {
-				about = append(about, strings.TrimSpace(rest))
+			// The descriptions start in one column, whatever precedes.
+			if len(line) > usageColumn {
+				about = append(about, strings.TrimSpace(line[usageColumn:]))
 			}
 		case found && strings.HasPrefix(line, "      ") && !strings.HasPrefix(text, "("):
 			about = append(about, text)

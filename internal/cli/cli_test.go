@@ -372,6 +372,14 @@ func TestCommandLineMistakes(t *testing.T) {
 	contains(t, f.inlayFails(f.root, 2, "claimm", "team", "x"), `did you mean "claim"?`, "a mistyped command with arguments")
 	contains(t, f.inlayFails(f.root, 2, "taem", "status"), `did you mean "team"?`, "a mistyped inlay")
 	contains(t, f.inlayFails(f.root, 1, "elsewhere", "status"), "git inlay ls lists the inlays here", "a name near nothing")
+	// A short word is near too much to guess from, and a name held back
+	// for a command to come is said to be one.
+	for _, word := range []string{"db", "me", "x"} {
+		if errOut := f.inlayFails(f.root, 1, word, "status"); strings.Contains(errOut, "did you mean") {
+			t.Errorf("git inlay %s status guessed at a command:\n%s", word, errOut)
+		}
+	}
+	contains(t, f.inlayFails(f.root, 1, "fetch"), "git-inlay has no fetch command, though the name is held back for one", "a held name")
 	contains(t, f.inlayFails(f.root, 2, "team"), "usage: git inlay team <git command> [<args>...]", "an inlay without a git command")
 
 	wt := filepath.Join(f.base, "wt")
@@ -394,6 +402,16 @@ func TestFirstPushNeedsNoUpstream(t *testing.T) {
 	f.inlayOK(f.root, "me", "push", "-q")
 	if got := f.inlayOK(f.root, "status", "me"); got != "me\tmain\tup to date\tclean" {
 		t.Fatalf("status after the first push of an inlay given its remote later = %q", got)
+	}
+	// An inlay attached from a sibling that was never pushed has no
+	// upstream to copy, and is published from the new worktree as plainly.
+	f.inlayOK(f.root, "init", "late", "--remote", f.bare("late-private"))
+	wt := filepath.Join(f.base, "wt")
+	f.git(f.root, "worktree", "add", "-q", wt, "-b", "feature")
+	f.inlayOK(wt, "attach", "late")
+	f.inlayOK(wt, "late", "push", "-q")
+	if got := f.inlayOK(wt, "status", "late"); got != "late\tmain\tup to date\tclean" {
+		t.Fatalf("status after the first push from the new worktree = %q", got)
 	}
 }
 

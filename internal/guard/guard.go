@@ -129,11 +129,13 @@ func (v Violation) String() string {
 // Quote renders s as one word of a command printed for the user to run,
 // so that a shell reads it back as s and nothing in it as syntax: a path
 // may hold "$(...)" or a backquote, and it comes from a commit that anyone
-// may have written. Everything goes in single quotes, which every shell
-// reads literally. A control character, which would break the line, is
-// spliced in as a word of its own in the $'...' form of bash, zsh and ksh;
-// a shell without that form reads a wrong word there, but still nothing
-// of the path as syntax.
+// may have written. Everything goes in single quotes, which sh and the
+// shells that follow it (dash, bash, zsh, ksh) read literally. A control
+// character, which would break the line, is spliced in as a word of its
+// own in the $'...' form of bash, zsh and ksh; a shell without that form
+// reads a wrong word there, but still nothing of the path as syntax. Fish
+// and PowerShell quote by other rules, and a path that holds a quote or a
+// backslash is not safe to paste there.
 func Quote(s string) string {
 	var b strings.Builder
 	b.WriteByte('\'')
