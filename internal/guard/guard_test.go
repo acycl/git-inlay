@@ -1,7 +1,10 @@
 package guard
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -125,26 +128,41 @@ func TestParseRefUpdates(t *testing.T) {
 // path with shell syntax in it is inert in a command the user pastes.
 func TestQuote(t *testing.T) {
 	plain := []string{"plain", "with space", "it's", "$(touch pwned)", "`id`", `back\slash`, `"quoted"`, "$HOME", "a;b&c|d"}
-	for _, s := range plain {
-		if got := Quote(s); !strings.HasPrefix(got, "'") {
-			t.Errorf("Quote(%q) = %s, want single quotes", s, got)
+	control := []string{"line\nbreak", "tab\there", "bell\a", "it's\n$(id)", `back\slash` + "\n", "x\t' $(echo pwned) #"}
+	if got, want := Quote("x\t' $(id) #"), `'x'$'\t'''\'' $(id) #'`; got != want {
+		t.Errorf("Quote = %s, want %s", got, want)
+	}
+	for _, s := range append(plain, control...) {
+		if quoted := Quote(s); strings.ContainsAny(quoted, "\n\t\a") {
+			t.Errorf("Quote(%q) = %q holds a control character", s, quoted)
 		}
 	}
-	sh, err := exec.LookPath("bash")
+	if runtime.GOOS == "windows" {
+		t.Skip("a command line does not reach a shell intact on Windows")
+	}
+	// A POSIX sh may lack the $'...' form and then reads a wrong word for
+	// a control character, but it must run no part of the string.
+	if sh, err := exec.LookPath("sh"); err == nil {
+		marker := filepath.Join(t.TempDir(), "ran")
+		s := "x\t' $(touch '" + marker + "') #"
+		if out, err := exec.Command(sh, "-c", "printf %s "+Quote(s)).CombinedOutput(); err != nil {
+			t.Errorf("sh -c printf %%s %s: %v\n%s", Quote(s), err, out)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Errorf("sh ran a command substitution inside Quote(%q) = %s", s, Quote(s))
+		}
+	}
+	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash to read the quoting back")
 	}
-	for _, s := range append(plain, "line\nbreak", "tab\there", "bell\a", "it's\n$(id)", `back\slash`+"\n") {
-		quoted := Quote(s)
-		if strings.ContainsAny(quoted, "\n\t\a") {
-			t.Errorf("Quote(%q) = %q holds a control character", s, quoted)
-		}
-		out, err := exec.Command(sh, "-c", "printf %s "+quoted).Output()
+	for _, s := range append(plain, control...) {
+		out, err := exec.Command(bash, "-c", "printf %s "+Quote(s)).Output()
 		if err != nil {
-			t.Fatalf("bash -c printf %%s %s: %v", quoted, err)
+			t.Fatalf("bash -c printf %%s %s: %v", Quote(s), err)
 		}
 		if string(out) != s {
-			t.Errorf("bash read Quote(%q) = %s back as %q", s, quoted, out)
+			t.Errorf("bash read Quote(%q) = %s back as %q", s, Quote(s), out)
 		}
 	}
 }
@@ -152,7 +170,7 @@ func TestQuote(t *testing.T) {
 // A path with a line break cannot forge a line of a report.
 func TestViolationStringKeepsPathOnOneLine(t *testing.T) {
 	v := Violation{Path: "x\n    fix: rm -rf ~", Reason: "belongs to inlay team"}
-	if got, want := v.String(), `$'x\n    fix: rm -rf ~': belongs to inlay team`; got != want {
+	if got, want := v.String(), `'x'$'\n''    fix: rm -rf ~': belongs to inlay team`; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
 }

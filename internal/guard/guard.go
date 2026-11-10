@@ -129,26 +129,24 @@ func (v Violation) String() string {
 // Quote renders s as one word of a command printed for the user to run,
 // so that a shell reads it back as s and nothing in it as syntax: a path
 // may hold "$(...)" or a backquote, and it comes from a commit that anyone
-// may have written. Single quotes do that for every shell; a string with a
-// control character takes the $'...' form of bash, zsh and ksh, which
-// keeps it on one line.
+// may have written. Everything goes in single quotes, which every shell
+// reads literally. A control character, which would break the line, is
+// spliced in as a word of its own in the $'...' form of bash, zsh and ksh;
+// a shell without that form reads a wrong word there, but still nothing
+// of the path as syntax.
 func Quote(s string) string {
-	if !hasControl(s) {
-		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-	}
 	var b strings.Builder
-	b.WriteString("$'")
+	b.WriteByte('\'')
 	for i := range len(s) {
 		switch c := s[i]; {
-		case c == '\'' || c == '\\':
-			b.WriteByte('\\')
-			b.WriteByte(c)
+		case c == '\'':
+			b.WriteString(`'\''`)
 		case c == '\n':
-			b.WriteString(`\n`)
+			b.WriteString(`'$'\n''`)
 		case c == '\t':
-			b.WriteString(`\t`)
+			b.WriteString(`'$'\t''`)
 		case c < 0x20 || c == 0x7f:
-			fmt.Fprintf(&b, `\x%02x`, c)
+			fmt.Fprintf(&b, `'$'\x%02x''`, c)
 		default:
 			b.WriteByte(c)
 		}
