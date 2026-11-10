@@ -688,6 +688,11 @@ Unit tests, table-driven, in each package:
 - remote: URL normalization pairs that must and must not compare equal
 - guard: pre-push stdin parsing, zero-oid handling, range construction
 
+The hand-written documents are held to the code in
+`internal/cli/docs_test.go`: the manual page and `docs/commands.md` must
+have a synopsis line for every verb and name every option of the usage
+text, and the README's command table must have a row for every verb.
+
 Integration tests with real git in `internal/cli`, one test function per
 scenario, each building a host repository, a local bare remote for the host,
 and local bare remotes for inlays. The binary is built once in TestMain and
