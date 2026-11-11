@@ -21,6 +21,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The site builds docs/ from release tags, so a release waits on the
+  # Acycl documentation standard's check as it does on the tests.
+  docs:
+    uses: acycl/docs-standard/.github/workflows/docs.yml@d816f9cf4e51735c9c7657eeed8e3e5ee05eff0d # v0.2.0
+
   test:
     name: test (${{ matrix.os }})
     strategy:
