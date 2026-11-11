@@ -1,5 +1,8 @@
 # Claude Code and other agents
 
+How to tell Claude Code, or another coding agent, which files in a
+checkout belong to inlays and how to commit them.
+
 ## The problem
 
 Claimed files never show in the host's `git status`, `git diff` or
@@ -35,13 +38,13 @@ from stdin and writes nothing to the repository.
 This repository is a Claude Code plugin marketplace with one plugin,
 `git-inlay`. Install it with:
 
-```
+```text tab="Claude Code 2.1.275 or later"
 /plugin install git-inlay --marketplace acycl/git-inlay
 ```
 
 or, on Claude Code before 2.1.275:
 
-```
+```text tab="Earlier versions"
 /plugin marketplace add acycl/git-inlay
 /plugin install git-inlay@git-inlay
 ```
@@ -63,7 +66,7 @@ stay enabled for every project.
 A team inlay can turn the plugin on for everyone who clones it, through
 the `.claude/settings.json` it delivers:
 
-```json
+```json title=".claude/settings.json"
 {
   "extraKnownMarketplaces": {
     "git-inlay": { "source": { "source": "github", "repo": "acycl/git-inlay" } }

@@ -1,6 +1,9 @@
 # Command reference
 
-```
+Every `git inlay` command, with its options, its output and its exit
+status.
+
+```text
 git inlay init <name> [--remote <url>] [--no-hooks]
 git inlay clone <url> [<name>] [--no-hooks]
 git inlay attach (<name>... | --all) [--no-hooks]
@@ -37,7 +40,7 @@ git inlay version
 ## Exit status
 
 | Status | Meaning |
-|---|---|
+| --- | --- |
 | 0 | success |
 | 1 | the command refused or failed: a guard or `check` found a problem, an inlay is unknown, work would be lost, files are in the way |
 | 2 | usage error |
@@ -51,7 +54,7 @@ whose work exists nowhere else.
 
 ### init
 
-```
+```text
 git inlay init <name> [--remote <url>] [--no-hooks]
 ```
 
@@ -78,7 +81,7 @@ leaves one, is not overwritten: `init` is refused until it is moved aside.
 
 ### clone
 
-```
+```text
 git inlay clone <url> [<name>] [--no-hooks]
 ```
 
@@ -93,7 +96,7 @@ would write is never overwritten: the clone is refused and lists the files.
 
 ### attach
 
-```
+```text
 git inlay attach (<name>... | --all) [--no-hooks]
 ```
 
@@ -104,7 +107,7 @@ the other worktree are reported, not copied. See [Worktrees](worktrees.md).
 
 ### detach
 
-```
+```text
 git inlay detach <name> [--force] [--keep-files]
 ```
 
@@ -118,7 +121,7 @@ command unless `--force` is given.
 
 ### claim
 
-```
+```text
 git inlay claim <name> [--] <path>...
 ```
 
@@ -133,7 +136,7 @@ is dropped as redundant, with a warning.
 
 ### unclaim
 
-```
+```text
 git inlay unclaim <name> [--] <path>...
 ```
 
@@ -142,7 +145,7 @@ to the host as untracked.
 
 ### ls
 
-```
+```text
 git inlay ls [<name>] [--porcelain]
 ```
 
@@ -152,7 +155,7 @@ lines only.
 
 ### which
 
-```
+```text
 git inlay which <path>...
 ```
 
@@ -163,7 +166,7 @@ name, `host`, or `none`.
 
 ### status
 
-```
+```text
 git inlay status [<name>] [--fetch] [--porcelain]
 ```
 
@@ -174,7 +177,7 @@ fails, the last known state is shown with a warning.
 
 With `--porcelain`, each line holds seven tab-separated fields:
 
-```
+```text
 name  branch  upstream  ahead  behind  changed  untracked
 ```
 
@@ -183,7 +186,7 @@ the branch has none.
 
 ### check
 
-```
+```text
 git inlay check [--staged] [--fix]
 ```
 
@@ -191,7 +194,7 @@ Verifies every invariant and exits 1 on a problem. Each problem names the
 path, the owner, and the command that fixes it. On success it prints a line
 such as:
 
-```
+```text
 ok: 2 inlay(s), 5 claim(s), nothing out of place
 ```
 
@@ -210,7 +213,7 @@ gone, and a checkout that has been moved.
 
 ### restore
 
-```
+```text
 git inlay restore [<name>]
 ```
 
@@ -220,7 +223,7 @@ alone. Only committed content comes back.
 
 ### prune
 
-```
+```text
 git inlay prune [--dry-run] [--force]
 ```
 
@@ -235,7 +238,7 @@ no interactive confirmation; use `--dry-run` to see what would happen.
 
 ### hooks
 
-```
+```text
 git inlay hooks (install [--auto-attach] | uninstall | status)
 ```
 
@@ -256,7 +259,7 @@ Manages the host's guards. See [Guards](guards.md) for the full behaviour.
 `pre-commit`, `pre-push`, `inlay-pre-push` and `post-checkout` are
 internal. One is meant to be called directly:
 
-```
+```text
 git inlay hook session-start
 ```
 
@@ -266,7 +269,7 @@ session-start hook, or nothing where there are none. See
 
 ## Running git against an inlay
 
-```
+```text
 git inlay <name> <git command> [<args>...]
 ```
 
@@ -306,7 +309,7 @@ refused while such files exist. The refusal names them.
 
 ## version
 
-```
+```text
 git inlay version
 ```
 

@@ -1,12 +1,15 @@
 # Worktrees
 
+How inlays work with `git worktree`: each worktree has its own copy of
+each inlay, attached by hand or automatically.
+
 ## The model
 
 Each worktree of the host has its own copy of each inlay, with its own
 index, HEAD and branch, just as each worktree has its own checkout of the
 host. The copies live under the host's shared git directory:
 
-```
+```text
 .git/inlays/main/<name>/      for the primary worktree
 .git/inlays/wt/<id>/<name>/   for the linked worktree <id>
 ```

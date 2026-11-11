@@ -80,7 +80,8 @@ edit the file, keep the claims of both sides, remove the marker lines, and
 ### `<path> is tracked by the host`
 
 A path the host tracks cannot be claimed. See
-[moving a file from the host into an inlay](workflows.md#moving-a-file-from-the-host-into-an-inlay).
+[moving a file from the host into an
+inlay](workflows.md#moving-a-file-from-the-host-into-an-inlay).
 
 ### `<path> is already owned by inlay <name>`
 
@@ -132,7 +133,11 @@ there. `git status` in the host shows what was overwritten; `git checkout
 -- <path>` there gets it back. Then take the path out of the inlay, or
 claim it, as the `fix:` line of each path says.
 
+<!-- markdownlint-disable MD013 -->
+
 ### `inlay <name> has uncommitted changes`, `has N stash(es)`, `has N commit(s) on no remote`
+
+<!-- markdownlint-enable MD013 -->
 
 `detach` and `prune` stop before work would be lost. Commit and push it,
 or pass `--force` to give it up. `prune` prints the push that clears each
@@ -160,7 +165,7 @@ Each path comes with its fix.
 ## Symptoms
 
 | Symptom | Cause and remedy |
-|---|---|
+| --- | --- |
 | The inlay's files are gone after `git clean -fdx` | They were ignored files to the host. `git inlay restore` brings back what was committed. |
 | The files are gone after `git stash --all` | They are in the stash. `git stash pop`, and do not run `git inlay restore` first. |
 | A new file under a claimed directory does not show in `git inlay <name> status` | The host's `.gitignore`, or your global excludes file, ignores it. Add it with `git inlay <name> add -f <path>`. |

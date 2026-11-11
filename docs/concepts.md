@@ -1,5 +1,8 @@
 # Concepts
 
+The model behind git-inlay, the terms it uses, and where each piece lives
+on disk.
+
 ## The model in one paragraph
 
 An **inlay** is a second git repository whose working tree is the host's.
@@ -11,7 +14,7 @@ repository, and each repository behaves as if the other were not there.
 ## Terms
 
 | Term | Meaning |
-|---|---|
+| --- | --- |
 | host | the repository whose working tree holds the inlay's files: the one you cloned |
 | inlay | a git repository with its own history and remote, attached to one worktree of the host |
 | claim | a path, relative to the root of the worktree, that an inlay owns; a directory claim ends with `/` and owns everything beneath it |
@@ -20,7 +23,7 @@ repository, and each repository behaves as if the other were not there.
 
 ## Where things live
 
-```
+```text
 .git/inlays/main/<name>/        the inlay's git directory, for the primary worktree
 .git/inlays/wt/<id>/<name>/     the same, for the linked worktree <id>
 .git/info/exclude               the host's exclude file, with a managed block
@@ -43,7 +46,7 @@ off.
 
 The manifest is a text file with one claim per line, kept sorted:
 
-```
+```text
 # git-inlay manifest for "claude". Edit with: git inlay claim claude <path>
 .claude/
 docs/research/
@@ -79,7 +82,7 @@ regenerates them from the manifests first, so they are always current.
 **The host's managed block.** In `.git/info/exclude`, a block lists every
 claim of every inlay attached to any worktree:
 
-```
+```text
 # >>> git-inlay managed block; do not edit >>>
 /.git-inlay
 /.claude
@@ -94,7 +97,7 @@ Text outside the markers is yours and is preserved byte for byte.
 patterns ignores everything, then re-includes each claim and the
 directories leading to it:
 
-```
+```text
 /*
 !/.git-inlay/
 /.git-inlay/*
@@ -129,7 +132,7 @@ file goes to whichever side owns the directory it is created in.
 enforce them as you work:
 
 | | Invariant | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | I1 | Disjointness | no path is both tracked by the host and claimed by an inlay, and no path is claimed by two inlays |
 | I2 | Exclusion | the host ignores every claim |
 | I3 | Containment | every file an inlay tracks is under one of its claims, or is its manifest |
@@ -170,7 +173,8 @@ consequences:
   outranks the inlay's exclude file too, so the inlay sees that file as
   untracked when it sits at the root of the tree or directly inside a
   directory that leads to a claim. A pattern that re-includes a whole
-  directory there (`!/src/`) shows the inlay everything in it. `git inlay check` warns about such
+  directory there (`!/src/`) shows the inlay everything in it. `git inlay check`
+  warns about such
   files. Keep them out of `git inlay <name> add`; `git inlay <name> clean`
   and `stash -u`, which would take them, are refused while any exist.
 

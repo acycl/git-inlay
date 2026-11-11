@@ -1,5 +1,8 @@
 # Day-to-day workflows
 
+How to record changes, get teammates' changes, move files in and out of
+an inlay, and recover deleted files.
+
 ## Recording changes
 
 Edit claimed files like any other. To record a change, commit it to the
@@ -81,7 +84,7 @@ Ordinary host operations leave the inlays' files alone, because the host
 ignores them:
 
 | Host operation | Effect on claimed files |
-|---|---|
+| --- | --- |
 | `checkout`, `switch`, `rebase`, `merge`, `cherry-pick`, `reset --hard` | none |
 | `stash`, `stash -u` | none |
 | `clean -fd` | none |

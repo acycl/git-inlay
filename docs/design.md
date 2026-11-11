@@ -39,7 +39,7 @@ Non-goals (deliberately out of scope):
 ## 2. Prior art and what we take from it
 
 | Tool | Taken | Left |
-|---|---|---|
+| --- | --- | --- |
 | git-dupe | state inside the host `.git`; explicit `GIT_DIR`/`GIT_WORK_TREE`; managed block in `info/exclude`; `git dupe clone` onboarding | dual tracking with a warning; no hooks; per-worktree state deleted by `git worktree remove`; argument-based remote guard |
 | sich | ownership across several layers; negation-chain exclude for the inlay; tracked `.paths` manifest; pre-commit guard | state in the tree; everyday-git wrappers; no pre-push guard; no linked worktrees |
 | overgit | tracked JSON manifest as the portable description | the override model entirely |
@@ -49,7 +49,8 @@ Non-goals (deliberately out of scope):
 New in git-inlay: disjointness enforced at claim time, a pre-push guard that
 scans outgoing commits, remote comparison on resolved URLs, hook shims designed
 to be called from hook managers, per-worktree inlay clones that survive
-worktree removal, and a restore verb instead of intercepting `clean` and `stash`.
+worktree removal, and a restore verb instead of intercepting `clean` and
+`stash`.
 
 ## 3. Terminology
 
@@ -67,7 +68,7 @@ worktree removal, and a restore verb instead of intercepting `clean` and `stash`
 
 ### 4.1 Layout
 
-```
+```text
 $C/inlays/main/<name>/            inlay git dir for the primary worktree
 $C/inlays/wt/<id>/<name>/         inlay git dir for linked worktree <id>
 $C/info/exclude                     host exclude file, carries the managed block
@@ -86,7 +87,7 @@ Each inlay implicitly claims its own manifest file.
 
 Created with `git init --bare` then configured:
 
-```
+```text
 core.bare = false
 core.worktree = <absolute path of the host worktree>
 inlay.name = <name>
@@ -105,7 +106,7 @@ scrubs inherited `GIT_*` variables (section 7.1).
 
 `.git-inlay/<name>.paths`, UTF-8, one claim per line, kept sorted:
 
-```
+```text
 # git-inlay manifest for "claude". Edit with: git inlay claim claude <path>
 .claude/
 docs/research/
@@ -150,7 +151,7 @@ check out, where `.Claude/x` is not under the claim `.claude/`.
 **Host managed block** in `$C/info/exclude`, regenerated at the start of every
 command from the union of all inlays attached to any worktree:
 
-```
+```text
 # >>> git-inlay managed block; do not edit >>>
 /.git-inlay
 /.claude
@@ -174,7 +175,7 @@ inlay's claims. The algorithm:
 
 Example for the manifest above:
 
-```
+```text
 /*
 !/.git-inlay/
 /.git-inlay/*
@@ -209,7 +210,7 @@ command line are relative to the current directory and are normalized against
 `git rev-parse --show-prefix`.
 
 | Command | Behaviour |
-|---|---|
+| --- | --- |
 | `git inlay init <name> [--remote <url>] [--no-hooks]` | create an empty inlay for this worktree; refuse a remote that matches a host remote; install the host guards that fit (section 7.3) unless `--no-hooks` |
 | `git inlay clone <url> [<name>] [--no-hooks]` | create the inlay from a remote, read its manifest, check claims against the host, check out; the inlay's name comes from its manifest, and `<name>`, when given, must match it |
 | `git inlay attach <name>... \| --all [--no-hooks]` | copy inlays attached in another worktree into this one: the sibling's current branch is checked out and its remote reused; `--all` takes every inlay not yet attached here |
@@ -231,7 +232,8 @@ command line are relative to the current directory and are normalized against
 
 Every command except `version`, `check` without `--fix` and the `hook`
 family begins with a sync step (`hook post-checkout` reaches one through
-the `attach --all` it runs): read the manifests of all attached inlays and regenerate the host managed
+the `attach --all` it runs): read the manifests of all attached inlays and
+regenerate the host managed
 block and this worktree's inlay excludes, without starting a git process
 beyond host discovery, a manifest read from HEAD where the file is
 missing (below), and the repair of a moved checkout. The claim verbs
@@ -263,7 +265,8 @@ loop or a script only for a command that died of one, not for one that
 exited non-zero. Any other signal that ends git, a quit or the broken
 pipe of a pager closed early, becomes the exit status a shell reports
 for it, 128 plus the signal: raised again in a Go program, a quit would
-print a goroutine dump and a broken pipe would be dropped. The fetch of `clone` and of `status --fetch` holds the
+print a goroutine dump and a broken pipe would be dropped. The fetch of `clone`
+and of `status --fetch` holds the
 signals the same way, so an interrupted clone removes its staging
 directory before it dies, and an interrupted `status --fetch` stops
 rather than move on to the next inlay's fetch. When the inlay's claims changed,
@@ -284,7 +287,8 @@ is what tells the user to look at the host's `git status`. The guards
 of the hook family, `hook session-start` and `check` read manifests but
 do not write: `check` reports an
 exclude file that differs from what the sync step would write (a stale
-managed block, or an inlay's stale `info/exclude`) as a violation, so it can see a hand edit and runs on a read-only
+managed block, or an inlay's stale `info/exclude`) as a violation, so it can see
+a hand edit and runs on a read-only
 `.git`. `check --fix` is the named way to repair it: it runs the sync
 step first and reports what remains. Any other verb repairs it too, as
 a side effect, but a fix that reads "run `git inlay ls`" explains
@@ -311,7 +315,8 @@ does not match this host or the inlay's push guard is not the current
 shim. A change to the config that `Configure` did not make, by hand,
 through an include, or by an older git-inlay, leaves the stamp alone, so
 ordinary commands do not see it; `check` compares the config itself and
-reports it, and `hooks install` rewrites it. The case-folded index of section 4.3
+reports it, and `hooks install` rewrites it. The case-folded index of section
+4.3
 is built only by the verbs that match paths against claims, the only
 ones that need `core.ignoreCase`.
 
@@ -329,7 +334,7 @@ ones that need `core.ignoreCase`.
 Guards:
 
 | Guard | Where | Checks |
-|---|---|---|
+| --- | --- | --- |
 | claim time | `claim`, `clone`, `attach` | I1 against `git ls-files -z -- <claims>` in the host and against other inlays' manifests |
 | pre-commit | host hook (shim, or config-defined on git 2.54+ where the shim cannot go) | staged paths (`git diff --cached --name-only -z --diff-filter=ACMRT`, as pre-push filters commits) under any claim or under `.git-inlay/`; staged deletions never block |
 | pre-push | host hook (as pre-commit) | for each ref update on stdin: skip deletions; range is `<remote-oid>..<local-oid>`, or `<local-oid> --not --remotes=<remote>` when the remote oid is zero; `git rev-list` piped to `git diff-tree -r -m --stdin --no-commit-id --name-only -z`; fail on any path under a claim |
@@ -337,7 +342,8 @@ Guards:
 | remote config | `init`, `clone`, `attach`, `check` | I4 on every configured remote |
 | hook presence | `check`; `init`, `clone`, `attach` place the shims that fit and warn about the rest | each host hook runs a guard, or `hooks install` cannot place one (section 7.3) |
 
-The pre-push input is accepted in two forms: the stdin lines git provides, and the
+The pre-push input is accepted in two forms: the stdin lines git provides, and
+the
 `PRE_COMMIT_FROM_REF`, `PRE_COMMIT_TO_REF` and `PRE_COMMIT_REMOTE_NAME`
 variables set by the pre-commit framework. For a push that carries a root
 commit the framework sets neither ref; the guard then scans
@@ -406,7 +412,7 @@ What guards do not cover, and the documented answer:
 
 ### 7.1 Package layout
 
-```
+```text
 cmd/git-inlay/main.go      entry point; calls internal/cli
 internal/cli/                the verbs, grouped by kind; flag parsing with the standard flag package
 internal/gitx/               git subprocess runner
@@ -576,7 +582,8 @@ hooks directory and the repository config are shared by linked worktrees,
 so one install covers all of them.
 
 `hooks status` reports, per hook, one of: `installed` (our shim), `inert`
-(our shim without its executable bit), `configured` (our config-defined hook, on git 2.54 or newer), `disabled`
+(our shim without its executable bit), `configured` (our config-defined hook, on
+git 2.54 or newer), `disabled`
 (that hook with `enabled = false`), `managed` by `core.hooksPath`,
 `foreign` (present and not our shim, which includes one the user added
 lines to), or `absent`. `check` reports a hook
@@ -605,7 +612,8 @@ worktree is made with `--no-checkout` or `--orphan`, which run no hook;
 `hook post-checkout` then runs `attach --all` when no inlay is attached
 there and another worktree has one. A checkout that leaves an unborn
 branch reports the same null id, so it attaches too if the worktree has
-no inlay yet, which is no harm: `attach` never overwrites a file. It is a convenience, not a guard: it is opt-in, `check` does not
+no inlay yet, which is no harm: `attach` never overwrites a file. It is a
+convenience, not a guard: it is opt-in, `check` does not
 count its absence, a missing binary makes its shim exit 0 where a guard
 fails closed, and it never fails, since its exit status would become the
 checkout's; a failed attach is a warning that names `attach --all`. Once
@@ -617,11 +625,13 @@ gone, or whose gitdir file or the `.git` file it names (resolved against
 `$C/worktrees/<id>` when relative) no longer exists and which is not
 locked (git keeps a locked worktree through an unmounted volume, and so
 does prune): the rules `git worktree prune` applies, read from the files
-without a process. It counts each inlay's commits on no remote (`rev-list HEAD --branches
+without a process. It counts each inlay's commits on no remote (`rev-list HEAD
+--branches
 --tags --not --remotes`, so an inlay without a remote counts every commit)
 and its stash entries, which no push carries, removes the rest, and keeps
 those unless `--force`, printing the `git --git-dir=<dir> --work-tree=$C
-push` that clears each. There is no interactive confirmation. `check` reports a stale inlay, because its
+push` that clears each. There is no interactive confirmation. `check` reports a
+stale inlay, because its
 claims keep binding every worktree until it is pruned. `prune` also
 removes the `.clone-*` staging directories that an interrupted `clone` or
 `attach` leaves under `$C/inlays/<key>/` (staging lives there so the final
@@ -741,7 +751,8 @@ exercised:
 9. detach with and without `--keep-files`.
 10. passthrough runs with the right git dir and refuses a verb as a name.
 
-Workflow scenarios in `internal/cli/workflow_test.go` automate the dogfooding step on a host shaped like an open-source monorepo:
+Workflow scenarios in `internal/cli/workflow_test.go` automate the dogfooding
+step on a host shaped like an open-source monorepo:
 a committed `.gitignore` with local-file rules, a public `CLAUDE.md` and
 `.claude/skills/`, nested packages, a submodule, a release branch and a tag
 from before the agent config existed, a foreign hook, and the global
@@ -810,7 +821,8 @@ workflow also runs weekly, for what changes while the repository does
 not: vulnerability advisories and the runners' git. Every
 action is pinned to a commit SHA with its version in a trailing comment,
 which Dependabot keeps current, and GoReleaser to an exact version,
-which it cannot see and is bumped by hand; the oldest-git job checks the git tarball
+which it cannot see and is bumped by hand; the oldest-git job checks the git
+tarball
 against kernel.org's published SHA-256 before building; a govulncheck job
 scans the module and the standard library it uses. `go.mod` names the
 oldest Go the code builds with (1.24, for `strings.Lines` and

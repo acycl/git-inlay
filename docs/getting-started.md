@@ -1,5 +1,8 @@
 # Getting started
 
+Install git-inlay, create a first inlay, share it with a teammate, and
+check that everything is in order.
+
 ## Requirements
 
 - Git 2.40 or later, with `user.name` and `user.email` set: creating an
@@ -11,7 +14,7 @@
 
 With Go:
 
-```sh
+```sh tab="go install"
 go install github.com/acycl/git-inlay/cmd/git-inlay@latest
 ```
 
@@ -20,7 +23,7 @@ Or download a release archive from the
 `git-inlay` on your `PATH`. Archives are built for Linux, macOS and Windows
 on amd64 and arm64, and carry a build provenance attestation:
 
-```sh
+```sh tab="Release archive"
 gh attestation verify <archive> --owner acycl
 ```
 
@@ -89,7 +92,8 @@ git inlay clone git@github.com:me/my-project-team.git
 
 The inlay must have been pushed first; `clone` says `the remote has no
 branches` of one that has not. `clone` reads the inlay's claims from its
-remote, checks them against this host, and checks the files out. It never overwrites a file that is already
+remote, checks them against this host, and checks the files out. It never
+overwrites a file that is already
 at a claimed path: the clone is refused and names the files to move aside.
 
 ## Check that everything is in order

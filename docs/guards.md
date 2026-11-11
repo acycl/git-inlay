@@ -7,7 +7,7 @@ published.
 ## What is guarded
 
 | Guard | Where it runs | Refuses |
-|---|---|---|
+| --- | --- | --- |
 | claim time | `claim`, `clone`, `attach` | a claim on a path the host tracks, or one that overlaps another inlay's claim |
 | pre-commit | host hook | a commit that stages a claimed path, or anything under `.git-inlay/` |
 | pre-push | host hook | a push whose commits touch a claimed path |
@@ -84,14 +84,14 @@ snippets differ.
 
 husky:
 
-```
+```text tab="husky"
 .husky/pre-commit:  git-inlay hook pre-commit
 .husky/pre-push:    git-inlay hook pre-push "$@"
 ```
 
 lefthook, in `lefthook.yml`:
 
-```yaml
+```yaml tab="lefthook" title="lefthook.yml"
 pre-commit:
   commands:
     git-inlay:
@@ -105,7 +105,7 @@ pre-push:
 
 The pre-commit framework, in `.pre-commit-config.yaml`:
 
-```yaml
+```yaml tab="pre-commit" title=".pre-commit-config.yaml"
 - repo: local
   hooks:
     - id: git-inlay-pre-commit
@@ -124,8 +124,8 @@ The pre-commit framework, in `.pre-commit-config.yaml`:
       stages: [pre-push]
 ```
 
-and install its pre-push hook, which `pre-commit install` alone leaves
-out:
+With the pre-commit framework, also install its pre-push hook, which
+`pre-commit install` alone leaves out:
 
 ```sh
 pre-commit install --hook-type pre-commit --hook-type pre-push
@@ -147,7 +147,7 @@ change to the host that its maintainers must accept.
 `git inlay hooks status` prints one line per hook with its state:
 
 | State | Meaning |
-|---|---|
+| --- | --- |
 | `installed` | git-inlay's shim is in the hooks directory |
 | `configured` | git-inlay's config-defined hook is in effect (git 2.54 or newer) |
 | `inert` | the shim is there but not executable, so git skips it |
